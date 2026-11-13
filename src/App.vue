@@ -12,8 +12,8 @@ const navItems = [
   { to: '/insights', label: 'Insight Bisnis' },
 ]
 
-function handleLogout() {
-  auth.logout()
+async function handleLogout() {
+  await auth.logout()
   router.push('/login')
 }
 </script>

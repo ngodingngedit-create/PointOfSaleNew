@@ -13,6 +13,7 @@ const processing = ref(false)
 const search = ref('')
 const isCartOpenMobile = ref(false)
 const showConfirmModal = ref(false)
+const selectedVariantIds = ref({})
 
 const categories = computed(() => {
   const cats = [
@@ -30,14 +31,44 @@ const filteredProducts = computed(() =>
   productsStore.products.filter((p) => {
     if (!p.is_active) return false
     if (activeCategory.value && (p.category || 'Lainnya') !== activeCategory.value) return false
-    if (search.value && !p.name.toLowerCase().includes(search.value.toLowerCase())) return false
+    if (search.value) {
+      const query = search.value.toLowerCase()
+      const matchesProduct = p.name.toLowerCase().includes(query)
+      const matchesSku = String(p.sku || '').toLowerCase().includes(query)
+      const matchesVariant = (Array.isArray(p.variants) ? p.variants : []).some((variant) =>
+        `${variant.name} ${variant.sku}`.toLowerCase().includes(query)
+      )
+      if (!matchesProduct && !matchesSku && !matchesVariant) return false
+    }
     return true
   })
 )
 
-function getQtyInCart(productId) {
-  const found = cart.items.find((i) => i.product.id === productId)
+function getSelectedVariant(product) {
+  if (!product.variants?.length) return null
+  return product.variants.find((variant) => variant.id === selectedVariantIds.value[product.id]) || product.variants[0]
+}
+
+function setSelectedVariant(product, variantId) {
+  selectedVariantIds.value = {...selectedVariantIds.value, [product.id]: variantId}
+}
+
+function getAvailableStock(product, variant = getSelectedVariant(product)) {
+  return variant?.stock ?? product.stock
+}
+
+function getDisplayedPrice(product, variant = getSelectedVariant(product)) {
+  return variant?.price ?? product.price
+}
+
+function getQtyInCart(product, variant = getSelectedVariant(product)) {
+  const variantKey = variant?.id || null
+  const found = cart.items.find((i) => i.product.id === product.id && (i.product.variantKey || null) === variantKey)
   return found ? found.qty : 0
+}
+
+function cartKey(product) {
+  return `${product.id}:${product.variantKey || 'single'}`
 }
 
 function formatRupiah(v) {
@@ -173,45 +204,62 @@ onMounted(() => productsStore.fetchProducts())
             :key="p.id"
             class="min-h-[140px] bg-white border rounded-lg p-3 text-left transition flex flex-col justify-between"
             :class="[
-              getQtyInCart(p.id) > 0 ? 'border-stone-900 ring-1 ring-stone-900' : 'border-stone-200 hover:border-stone-400',
-              p.stock <= 0 ? 'opacity-40 pointer-events-none' : ''
+              getQtyInCart(p) > 0 ? 'border-stone-900 ring-1 ring-stone-900' : 'border-stone-200 hover:border-stone-400',
+              getAvailableStock(p) <= 0 ? 'opacity-50' : ''
             ]"
           >
-            <div class="cursor-pointer" @click="cart.addItem(p)">
+            <div class="cursor-pointer" @click="cart.addItem(p, getSelectedVariant(p))">
               <!-- Thumbnail gambar jika ada -->
               <div v-if="p.image_url" class="w-full h-24 mb-2 rounded overflow-hidden bg-stone-100 border border-stone-100">
                 <img :src="p.image_url" :alt="p.name" class="w-full h-full object-cover" loading="lazy" />
               </div>
 
+              <select
+                v-if="p.variants?.length"
+                :value="getSelectedVariant(p)?.id"
+                @click.stop
+                @change.stop="setSelectedVariant(p, $event.target.value)"
+                class="w-full mb-2 h-8 px-2 text-xs bg-white border border-stone-300 rounded"
+                aria-label="Pilih varian"
+              >
+                <option v-for="variant in p.variants" :key="variant.id" :value="variant.id">
+                  {{ variant.name }}{{ variant.sku ? ` · ${variant.sku}` : '' }}
+                </option>
+              </select>
+
               <div class="flex items-center justify-between gap-1 text-[11px] text-stone-500 font-medium">
                 <span class="truncate">{{ p.category || 'Reguler' }}</span>
                 <span
                   class="px-1.5 py-0.5 rounded text-[10px] font-mono"
-                  :class="p.stock <= 5 ? 'bg-amber-100 text-amber-900 font-bold' : 'bg-stone-100 text-stone-600'"
+                  :class="getAvailableStock(p) <= 5 ? 'bg-amber-100 text-amber-900 font-bold' : 'bg-stone-100 text-stone-600'"
                 >
-                  {{ p.stock }} sisa
+                  {{ getAvailableStock(p) }} sisa
                 </span>
               </div>
               <p class="font-medium text-stone-900 text-sm mt-1 line-clamp-2">{{ p.name }}</p>
+              <p v-if="getSelectedVariant(p)?.name" class="text-[11px] text-stone-600 mt-0.5">{{ getSelectedVariant(p).name }}</p>
+              <p v-if="getSelectedVariant(p)?.sku || p.sku" class="text-[10px] text-stone-500 font-mono mt-0.5">
+                SKU: {{ getSelectedVariant(p)?.sku || p.sku }}
+              </p>
             </div>
 
             <div class="mt-3 pt-2 border-t border-stone-100 flex items-center justify-between">
-              <span class="text-stone-900 font-semibold text-sm font-mono">{{ formatRupiah(p.price) }}</span>
+              <span class="text-stone-900 font-semibold text-sm font-mono">{{ formatRupiah(getDisplayedPrice(p)) }}</span>
 
               <!-- Direct Add/Qty Button -->
-              <div v-if="getQtyInCart(p.id) > 0" class="flex items-center gap-1">
+              <div v-if="getQtyInCart(p) > 0" class="flex items-center gap-1">
                 <button
                   type="button"
-                  @click.stop="cart.decrementQty(p.id)"
+                  @click.stop="cart.decrementQty(p.id, getSelectedVariant(p)?.id || null)"
                   class="w-6 h-6 rounded bg-stone-100 hover:bg-stone-200 text-stone-800 text-xs font-bold flex items-center justify-center"
                 >
                   -
                 </button>
-                <span class="text-xs font-mono font-semibold px-1">{{ getQtyInCart(p.id) }}</span>
+                <span class="text-xs font-mono font-semibold px-1">{{ getQtyInCart(p) }}</span>
                 <button
                   type="button"
-                  @click.stop="cart.incrementQty(p.id)"
-                  :disabled="getQtyInCart(p.id) >= p.stock"
+                  @click.stop="cart.incrementQty(p.id, getSelectedVariant(p)?.id || null)"
+                  :disabled="getQtyInCart(p) >= getAvailableStock(p)"
                   class="w-6 h-6 rounded bg-stone-900 hover:bg-stone-800 text-white text-xs font-bold flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed"
                 >
                   +
@@ -220,8 +268,8 @@ onMounted(() => productsStore.fetchProducts())
               <button
                 v-else
                 type="button"
-                @click.stop="cart.addItem(p)"
-                :disabled="p.stock <= 0"
+                @click.stop="cart.addItem(p, getSelectedVariant(p))"
+                :disabled="getAvailableStock(p) <= 0"
                 class="px-2 py-1 rounded bg-stone-100 hover:bg-stone-900 hover:text-white text-stone-700 text-xs font-medium transition-colors"
               >
                 + Tambah
@@ -265,16 +313,20 @@ onMounted(() => productsStore.fetchProducts())
           <div v-else class="divide-y divide-stone-100 my-3 max-h-72 overflow-y-auto pr-1">
             <div
               v-for="i in cart.items"
-              :key="i.product.id"
+              :key="cartKey(i.product)"
               class="py-2.5 flex items-center justify-between gap-2"
             >
               <div class="min-w-0 flex-1">
-                <p class="text-xs sm:text-sm font-medium text-stone-800 truncate">{{ i.product.name }}</p>
-                <p class="text-xs text-stone-500 font-mono">{{ formatRupiah(i.product.price) }} × {{ i.qty }}</p>
+                <p class="text-xs sm:text-sm font-medium text-stone-800 truncate">
+                  {{ i.product.name }}<span v-if="i.product.variantName"> — {{ i.product.variantName }}</span>
+                </p>
+                <p class="text-xs text-stone-500 font-mono">
+                  <span v-if="i.product.sku">SKU {{ i.product.sku }} · </span>{{ formatRupiah(i.product.price) }} × {{ i.qty }}
+                </p>
               </div>
               <div class="flex items-center gap-1.5">
                 <button
-                  @click="cart.decrementQty(i.product.id)"
+                  @click="cart.decrementQty(i.product.id, i.product.variantKey)"
                   type="button"
                   aria-label="Kurangi jumlah"
                   class="w-8 h-8 rounded border border-stone-300 text-stone-700 hover:bg-stone-100 flex items-center justify-center font-bold text-sm"
@@ -283,7 +335,7 @@ onMounted(() => productsStore.fetchProducts())
                 </button>
                 <span class="w-7 text-center text-xs font-semibold font-mono">{{ i.qty }}</span>
                 <button
-                  @click="cart.incrementQty(i.product.id)"
+                  @click="cart.incrementQty(i.product.id, i.product.variantKey)"
                   type="button"
                   aria-label="Tambah jumlah"
                   :disabled="i.qty >= i.product.stock"
@@ -292,7 +344,7 @@ onMounted(() => productsStore.fetchProducts())
                   +
                 </button>
                 <button
-                  @click="cart.removeItem(i.product.id)"
+                  @click="cart.removeItem(i.product.id, i.product.variantKey)"
                   type="button"
                   class="w-8 h-8 text-xs text-stone-400 hover:text-red-700 flex items-center justify-center ml-1"
                   title="Hapus item"
@@ -386,18 +438,22 @@ onMounted(() => productsStore.fetchProducts())
         </div>
 
         <div class="divide-y divide-stone-100 my-3 overflow-y-auto flex-1">
-          <div
-            v-for="i in cart.items"
-            :key="i.product.id"
-            class="py-2.5 flex items-center justify-between gap-2"
-          >
-            <div class="min-w-0 flex-1">
-              <p class="text-xs font-medium text-stone-800 truncate">{{ i.product.name }}</p>
-              <p class="text-[11px] text-stone-500 font-mono">{{ formatRupiah(i.product.price) }} × {{ i.qty }}</p>
-            </div>
-            <div class="flex items-center gap-1.5">
+            <div
+              v-for="i in cart.items"
+              :key="cartKey(i.product)"
+              class="py-2.5 flex items-center justify-between gap-2"
+            >
+              <div class="min-w-0 flex-1">
+              <p class="text-xs font-medium text-stone-800 truncate">
+                {{ i.product.name }}<span v-if="i.product.variantName"> — {{ i.product.variantName }}</span>
+              </p>
+              <p class="text-[11px] text-stone-500 font-mono">
+                <span v-if="i.product.sku">SKU {{ i.product.sku }} · </span>{{ formatRupiah(i.product.price) }} × {{ i.qty }}
+              </p>
+              </div>
+              <div class="flex items-center gap-1.5">
               <button
-                @click="cart.decrementQty(i.product.id)"
+                @click="cart.decrementQty(i.product.id, i.product.variantKey)"
                 type="button"
                 class="w-7 h-7 rounded border border-stone-300 text-stone-700 font-bold text-xs"
               >
@@ -405,7 +461,7 @@ onMounted(() => productsStore.fetchProducts())
               </button>
               <span class="w-6 text-center text-xs font-semibold font-mono">{{ i.qty }}</span>
               <button
-                @click="cart.incrementQty(i.product.id)"
+                @click="cart.incrementQty(i.product.id, i.product.variantKey)"
                 type="button"
                 :disabled="i.qty >= i.product.stock"
                 class="w-7 h-7 rounded border border-stone-300 text-stone-700 font-bold text-xs disabled:opacity-30"
@@ -466,10 +522,13 @@ onMounted(() => productsStore.fetchProducts())
         <div class="bg-stone-50 border border-stone-200 rounded-md p-3 mb-4 space-y-2 max-h-48 overflow-y-auto">
           <div
             v-for="i in cart.items"
-            :key="i.product.id"
+            :key="cartKey(i.product)"
             class="flex items-center justify-between text-xs"
           >
-            <span class="text-stone-800 font-medium truncate pr-2">{{ i.qty }}x {{ i.product.name }}</span>
+            <span class="text-stone-800 font-medium truncate pr-2">
+              {{ i.qty }}x {{ i.product.name }}<span v-if="i.product.variantName"> — {{ i.product.variantName }}</span>
+              <span v-if="i.product.sku" class="block text-[10px] text-stone-500 font-mono">SKU {{ i.product.sku }}</span>
+            </span>
             <span class="text-stone-600 font-mono whitespace-nowrap">{{ formatRupiah(i.product.price * i.qty) }}</span>
           </div>
         </div>

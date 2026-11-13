@@ -9,47 +9,59 @@ export const useCartStore = defineStore('cart', () => {
   )
   const count = computed(() => items.value.reduce((sum, i) => sum + i.qty, 0))
 
-  function addItem(product) {
-    if (product.stock <= 0) return
-    const existing = items.value.find((i) => i.product.id === product.id)
+  function matchesLine(item, productId, variantKey = null) {
+    return item.product.id === productId && (item.product.variantKey || null) === (variantKey || null)
+  }
+
+  function addItem(product, variant = null) {
+    const selected = {
+      ...product,
+      price: variant?.price ?? product.price,
+      stock: variant?.stock ?? product.stock,
+      sku: variant?.sku || product.sku || '',
+      variantName: variant?.name || '',
+      variantKey: variant?.id || null,
+    }
+    if (selected.stock <= 0) return
+    const existing = items.value.find((i) => matchesLine(i, product.id, selected.variantKey))
     if (existing) {
-      if (existing.qty >= product.stock) return
+      if (existing.qty >= selected.stock) return
       existing.qty++
     } else {
-      items.value.push({ product, qty: 1 })
+      items.value.push({ product: selected, qty: 1 })
     }
   }
 
-  function incrementQty(productId) {
-    const item = items.value.find((i) => i.product.id === productId)
+  function incrementQty(productId, variantKey = null) {
+    const item = items.value.find((i) => matchesLine(i, productId, variantKey))
     if (item && item.qty < item.product.stock) {
       item.qty++
     }
   }
 
-  function decrementQty(productId) {
-    const item = items.value.find((i) => i.product.id === productId)
+  function decrementQty(productId, variantKey = null) {
+    const item = items.value.find((i) => matchesLine(i, productId, variantKey))
     if (!item) return
     if (item.qty <= 1) {
-      removeItem(productId)
+      removeItem(productId, variantKey)
     } else {
       item.qty--
     }
   }
 
-  function setQty(productId, newQty) {
-    const item = items.value.find((i) => i.product.id === productId)
+  function setQty(productId, newQty, variantKey = null) {
+    const item = items.value.find((i) => matchesLine(i, productId, variantKey))
     if (!item) return
     const parsed = Number(newQty)
     if (isNaN(parsed) || parsed <= 0) {
-      removeItem(productId)
+      removeItem(productId, variantKey)
     } else {
       item.qty = Math.min(parsed, item.product.stock)
     }
   }
 
-  function removeItem(productId) {
-    items.value = items.value.filter((i) => i.product.id !== productId)
+  function removeItem(productId, variantKey = null) {
+    items.value = items.value.filter((i) => !matchesLine(i, productId, variantKey))
   }
 
   function clear() {
@@ -68,10 +80,11 @@ export const useCartStore = defineStore('cart', () => {
         ? crypto.randomUUID()
         : `idemp-${Date.now()}-${Math.random().toString(36).slice(2)}`
 
-    // Payload hanya mengirim ID produk, jumlah, payment method, dan idempotency key
+    // Server resolves authoritative SKU, price, and stock from Sanity.
     const payload = {
       items: items.value.map((i) => ({
         productId: i.product.id,
+        ...(i.product.variantKey ? { variantKey: i.product.variantKey } : {}),
         qty: i.qty,
       })),
       paymentMethod,

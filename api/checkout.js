@@ -1,5 +1,8 @@
 import { createClient } from '@sanity/client'
 import crypto from 'node:crypto'
+import { requireSession } from './_lib/sessions.js'
+import { methodNotAllowed, publicError, sendJson, validateSameOrigin } from './_lib/http.js'
+import { buildCheckoutPlan, parseCheckoutItems } from './_lib/checkout-plan.js'
 
 // Memory cache untuk idempotency key guna mencegah request dobel / replay attack
 const processedTransactions = new Map()
@@ -46,79 +49,38 @@ export async function processCheckout(body, env = process.env) {
     useCdn: false,
   })
 
-  // Agregasi kuantitas yang diminta jika terdapat ID produk duplikat dalam payload
-  const requestedMap = new Map()
-  for (const item of items) {
-    const pId = item?.productId || item?.product_id || item?.id
-    const qty = Number(item?.qty)
-    if (!pId || !Number.isInteger(qty) || qty <= 0) {
-      const err = new Error('Format item pesanan tidak valid')
-      err.statusCode = 400
-      throw err
-    }
-    requestedMap.set(pId, (requestedMap.get(pId) || 0) + qty)
-  }
-
-  const productIds = Array.from(requestedMap.keys())
+  const requestedLines = parseCheckoutItems(items)
+  const productIds = [...new Set(requestedLines.map((line) => line.productId))]
 
   // Ambil ulang snapshot harga dan stok terkini secara real-time dari Sanity
   const query = `*[_type == "product" && _id in $productIds]{
     _id,
+    _rev,
     name,
     category,
+    sku,
     price,
     stock,
-    isActive
+    isActive,
+    variants[]{_key,name,sku,price,stock}
   }`
   const dbProducts = await serverClient.fetch(query, { productIds })
-  const dbProductMap = new Map(dbProducts.map((p) => [p._id, p]))
-
-  // Validasi: pastikan semua produk ada, berstatus aktif, dan stok mencukupi
-  const verifiedItems = []
-  let calculatedTotal = 0
-
-  for (const [productId, requestedQty] of requestedMap.entries()) {
-    const product = dbProductMap.get(productId)
-    if (!product) {
-      const err = new Error(`Produk dengan ID ${productId} tidak ditemukan`)
-      err.statusCode = 404
-      throw err
-    }
-
-    if (product.isActive === false) {
-      const err = new Error(`Produk "${product.name}" sedang nonaktif dan tidak dapat dibeli`)
-      err.statusCode = 400
-      throw err
-    }
-
-    if (product.stock < requestedQty) {
-      const err = new Error(
-        `Stok tidak mencukupi untuk "${product.name}". Tersedia: ${product.stock}, diminta: ${requestedQty}`
-      )
-      err.statusCode = 409
-      throw err
-    }
-
-    const price = Number(product.price) || 0
-    calculatedTotal += price * requestedQty
-
-    verifiedItems.push({
-      productId: product._id,
-      productName: product.name,
-      category: product.category || 'Reguler',
-      priceAtSale: price,
-      qty: requestedQty,
-      subtotal: price * requestedQty,
-    })
-  }
+  const {verifiedItems, calculatedTotal, stockUpdates} = buildCheckoutPlan(requestedLines, dbProducts)
 
   // Eksekusi mutasi decrement stok secara atomik melalui Sanity transaction
   let mutation = serverClient.transaction()
-  for (const [productId, requestedQty] of requestedMap.entries()) {
-    mutation = mutation.patch(productId, (patch) => patch.dec({ stock: requestedQty }))
+  for (const update of stockUpdates) {
+    mutation = mutation.patch(update.productId, (patch) => {
+      if (update.parentQty > 0) patch.dec({stock: update.parentQty})
+      for (const variantUpdate of update.variantQtys) {
+        patch.dec({[`variants[_key=="${variantUpdate.variantKey}"].stock`]: variantUpdate.qty})
+      }
+      if (update.revision) patch.ifRevisionId(update.revision)
+      return patch
+    })
   }
 
-  const mutationResult = await mutation.commit()
+  await mutation.commit()
 
   const transactionRecord = {
     transactionId: `TX-${Date.now()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`,
@@ -141,20 +103,19 @@ export async function processCheckout(body, env = process.env) {
   return transactionRecord
 }
 
-export default async function handler(req, res) {
+export default async function handler(req, res, env = process.env) {
   // Hanya menerima metode POST
   if (req.method !== 'POST') {
-    res.setHeader('Allow', 'POST')
-    return res.status(405).json({ error: 'Method Not Allowed' })
+    return methodNotAllowed(res, 'POST')
   }
 
   try {
-    const result = await processCheckout(req.body, process.env)
-    return res.status(200).json(result)
+    validateSameOrigin(req)
+    requireSession(req, env, 'cashier')
+    const result = await processCheckout(req.body, env)
+    return sendJson(res, 200, result)
   } catch (error) {
-    const statusCode = error.statusCode || 500
-    return res.status(statusCode).json({
-      error: error.message || 'Terjadi kesalahan internal pada server',
-    })
+    const { statusCode, message } = publicError(error, 'Checkout is temporarily unavailable')
+    return sendJson(res, statusCode, { error: message })
   }
 }

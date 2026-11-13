@@ -1,94 +1,79 @@
 import vue from '@vitejs/plugin-vue'
 import tailwindcss from '@tailwindcss/vite'
 import { defineConfig, loadEnv } from 'vite'
-import { processCheckout } from './api/checkout.js'
-import { getCashiers } from './api/cashiers.js'
-import { verifyCashierPin } from './api/login-pin.js'
+import cashierDirectory from './api/cashiers.js'
+import cashierPinLogin from './api/login-pin.js'
+import checkout from './api/checkout.js'
+import session from './api/session.js'
+import logout from './api/logout.js'
+import adminLogin from './api/admin/login.js'
+import adminCashierPins from './api/admin/cashier-pins.js'
+
+const API_HANDLERS = new Map([
+  ['/api/cashiers', cashierDirectory],
+  ['/api/login-pin', cashierPinLogin],
+  ['/api/checkout', checkout],
+  ['/api/session', session],
+  ['/api/logout', logout],
+  ['/api/admin/login', adminLogin],
+  ['/api/admin/cashier-pins', adminCashierPins],
+])
+
+function apiMiddleware(env) {
+  return async (req, res, next) => {
+    let pathname
+    try { pathname = new URL(req.url || '/', 'http://vite.local').pathname } catch { return next() }
+    const handler = API_HANDLERS.get(pathname)
+    if (!handler) return next()
+
+    res.status = (statusCode) => { res.statusCode = statusCode; return res }
+    res.json = (body) => {
+      if (!res.headersSent) res.setHeader('Content-Type', 'application/json; charset=utf-8')
+      return res.end(JSON.stringify(body))
+    }
+
+    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
+      let rawBody = ''
+      try {
+        for await (const chunk of req) {
+          rawBody += chunk
+          if (Buffer.byteLength(rawBody, 'utf8') > 16 * 1024) {
+            res.statusCode = 413
+            res.setHeader('Content-Type', 'application/json; charset=utf-8')
+            return res.end(JSON.stringify({ error: 'Request body is too large' }))
+          }
+        }
+        req.body = rawBody ? JSON.parse(rawBody) : {}
+      } catch {
+        res.statusCode = 400
+        res.setHeader('Content-Type', 'application/json; charset=utf-8')
+        return res.end(JSON.stringify({ error: 'Invalid JSON request body' }))
+      }
+    }
+
+    try {
+      await handler(req, res, env)
+    } catch {
+      if (!res.writableEnded) {
+        res.statusCode = 503
+        res.setHeader('Content-Type', 'application/json; charset=utf-8')
+        res.setHeader('Cache-Control', 'no-store')
+        res.end(JSON.stringify({ error: 'API is temporarily unavailable' }))
+      }
+    }
+  }
+}
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
-
   return {
     plugins: [
       vue(),
       tailwindcss(),
       {
-        name: 'local-api-endpoints-middleware',
+        name: 'secure-local-api-endpoints',
         configureServer(server) {
-          // Endpoint: GET /api/cashiers
-          server.middlewares.use('/api/cashiers', async (req, res) => {
-            if (req.method !== 'GET') {
-              res.statusCode = 405
-              res.setHeader('Content-Type', 'application/json')
-              res.end(JSON.stringify({ error: 'Method Not Allowed' }))
-              return
-            }
-            try {
-              const list = await getCashiers(env)
-              res.statusCode = 200
-              res.setHeader('Content-Type', 'application/json')
-              res.end(JSON.stringify(list))
-            } catch (err) {
-              res.statusCode = 500
-              res.setHeader('Content-Type', 'application/json')
-              res.end(JSON.stringify({ error: err.message }))
-            }
-          })
-
-          // Endpoint: POST /api/login-pin
-          server.middlewares.use('/api/login-pin', async (req, res) => {
-            if (req.method !== 'POST') {
-              res.statusCode = 405
-              res.setHeader('Content-Type', 'application/json')
-              res.end(JSON.stringify({ error: 'Method Not Allowed' }))
-              return
-            }
-            let rawBody = ''
-            req.on('data', (chunk) => {
-              rawBody += chunk
-            })
-            req.on('end', async () => {
-              try {
-                const body = rawBody ? JSON.parse(rawBody) : {}
-                const result = await verifyCashierPin(body, env)
-                res.statusCode = 200
-                res.setHeader('Content-Type', 'application/json')
-                res.end(JSON.stringify(result))
-              } catch (err) {
-                res.statusCode = err.statusCode || 500
-                res.setHeader('Content-Type', 'application/json')
-                res.end(JSON.stringify({ error: err.message }))
-              }
-            })
-          })
-
-          // Endpoint: POST /api/checkout
-          server.middlewares.use('/api/checkout', async (req, res) => {
-            if (req.method !== 'POST') {
-              res.statusCode = 405
-              res.setHeader('Content-Type', 'application/json')
-              res.end(JSON.stringify({ error: 'Method Not Allowed' }))
-              return
-            }
-
-            let rawBody = ''
-            req.on('data', (chunk) => {
-              rawBody += chunk
-            })
-            req.on('end', async () => {
-              try {
-                const body = rawBody ? JSON.parse(rawBody) : {}
-                const result = await processCheckout(body, env)
-                res.statusCode = 200
-                res.setHeader('Content-Type', 'application/json')
-                res.end(JSON.stringify(result))
-              } catch (err) {
-                res.statusCode = err.statusCode || 500
-                res.setHeader('Content-Type', 'application/json')
-                res.end(JSON.stringify({ error: err.message || 'Internal Server Error' }))
-              }
-            })
-          })
+          server.middlewares.use(apiMiddleware(env))
         },
       },
     ],

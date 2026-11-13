@@ -1,78 +1,104 @@
+import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
 
-const STORAGE_KEY = 'pos_cashier_session'
+async function parseResponse(res, fallback) {
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data.error || fallback)
+  return data
+}
 
 export const useAuthStore = defineStore('auth', () => {
-  const cashier = ref(null) // { id, name, role }
-  const token = ref(null)
+  const session = ref(null)
   const loading = ref(true)
+  const initialized = ref(false)
+  const cashier = computed(() => session.value?.role === 'cashier' ? session.value.cashier : null)
+  const admin = computed(() => session.value?.role === 'admin' ? session.value.admin : null)
 
-  // Inisialisasi session dari localStorage
-  function init() {
+  function clearSession() {
+    session.value = null
+  }
+
+  async function init(force = false) {
+    if (initialized.value && !force) return
+    loading.value = true
     try {
-      const stored = localStorage.getItem(STORAGE_KEY)
-      if (stored) {
-        const parsed = JSON.parse(stored)
-        cashier.value = parsed.cashier || null
-        token.value = parsed.token || null
+      const res = await fetch('/api/session', { credentials: 'same-origin', cache: 'no-store' })
+      if (!res.ok) {
+        clearSession()
+        return
       }
-    } catch (e) {
-      console.warn('Gagal memuat session kasir lokal:', e)
-      localStorage.removeItem(STORAGE_KEY)
+      const data = await res.json()
+      if (data.authenticated && data.role === 'cashier' && data.cashier?.id) {
+        session.value = { role: 'cashier', cashier: data.cashier }
+      } else if (data.authenticated && data.role === 'admin' && data.admin?.username) {
+        session.value = { role: 'admin', admin: data.admin }
+      } else {
+        clearSession()
+      }
+    } catch {
+      clearSession()
     } finally {
       loading.value = false
+      initialized.value = true
     }
   }
 
-  // Ambil daftar kasir aktif untuk pilihan profil
   async function fetchCashiers() {
-    const res = await fetch('/api/cashiers')
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}))
-      throw new Error(data.error || 'Gagal mengambil daftar kasir')
-    }
-    return await res.json()
+    const res = await fetch('/api/cashiers', { credentials: 'same-origin', cache: 'no-store' })
+    return parseResponse(res, 'Unable to load cashier profiles')
   }
 
-  // Verifikasi PIN kasir via serverless endpoint Vercel
   async function loginWithPin(cashierId, pin) {
     const res = await fetch('/api/login-pin', {
       method: 'POST',
+      credentials: 'same-origin',
+      cache: 'no-store',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ cashierId, pin }),
     })
-
-    const data = await res.json().catch(() => ({}))
-
-    if (!res.ok) {
-      throw new Error(data.error || 'Verifikasi PIN gagal')
-    }
-
-    cashier.value = data.cashier
-    token.value = data.token
-
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({ cashier: data.cashier, token: data.token })
-    )
-
+    const data = await parseResponse(res, 'PIN verification failed')
+    session.value = { role: 'cashier', cashier: data.cashier }
+    initialized.value = true
     return data
   }
 
-  function logout() {
-    cashier.value = null
-    token.value = null
-    localStorage.removeItem(STORAGE_KEY)
+  async function loginAdmin(username, password) {
+    const res = await fetch('/api/admin/login', {
+      method: 'POST',
+      credentials: 'same-origin',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    })
+    const data = await parseResponse(res, 'Administrator sign-in failed')
+    session.value = { role: 'admin', admin: data.admin }
+    initialized.value = true
+    return data
+  }
+
+  async function logout() {
+    try {
+      await fetch('/api/logout', {
+        method: 'POST',
+        credentials: 'same-origin',
+        cache: 'no-store',
+      })
+    } finally {
+      clearSession()
+      initialized.value = true
+    }
   }
 
   return {
+    session,
     cashier,
-    token,
+    admin,
     loading,
+    initialized,
     init,
     fetchCashiers,
     loginWithPin,
+    loginAdmin,
     logout,
   }
 })

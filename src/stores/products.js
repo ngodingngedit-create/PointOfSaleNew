@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { isSanityConfigured, PRODUCT_QUERY, sanityClient } from '../lib/sanity'
+import { normalizeSanityProduct } from '../lib/product'
 import { supabase } from '../lib/supabase'
 
 export const useProductsStore = defineStore('products', () => {
@@ -15,15 +16,7 @@ export const useProductsStore = defineStore('products', () => {
       if (isSanityConfigured && sanityClient) {
         // Query hanya produk aktif dari dataset publik Sanity
         const sanityData = await sanityClient.fetch(PRODUCT_QUERY)
-        products.value = (sanityData || []).map((p) => ({
-          id: p._id,
-          name: p.name,
-          category: p.category || 'Reguler',
-          price: Number(p.price) || 0,
-          stock: Number(p.stock) || 0,
-          image_url: p.imageUrl || '',
-          is_active: true,
-        }))
+        products.value = (sanityData || []).map(normalizeSanityProduct)
       } else {
         const { data, error: supaError } = await supabase
           .from('products')
@@ -44,10 +37,19 @@ export const useProductsStore = defineStore('products', () => {
   // Update stok lokal setelah checkout berhasil
   function deductLocalStock(items) {
     for (const item of items) {
-      const pId = item.productId || item.product?.id
+      const cartProduct = item.product || item
+      const pId = item.productId || cartProduct.id
       const p = products.value.find((prod) => prod.id === pId)
       if (p) {
-        p.stock = Math.max(0, p.stock - (item.qty || 1))
+        const qty = item.qty || 1
+        const variant = cartProduct.variantKey
+          ? p.variants.find((candidate) => candidate.id === cartProduct.variantKey)
+          : null
+        if (variant && variant.stock !== null) {
+          variant.stock = Math.max(0, variant.stock - qty)
+        } else {
+          p.stock = Math.max(0, p.stock - qty)
+        }
       }
     }
   }

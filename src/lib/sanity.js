@@ -18,7 +18,10 @@ export const PRODUCT_QUERY = `*[_type == "product" && isActive == true]{
   _id,
   name,
   category,
+  sku,
   price,
   stock,
-  imageUrl
+  imageUrl,
+  image{asset->{_id,url},alt},
+  variants[]{_key,name,sku,price,stock}
 }`

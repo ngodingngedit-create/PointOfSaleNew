@@ -3,6 +3,8 @@ import { useAuthStore } from '../stores/auth'
 
 const routes = [
   { path: '/login', name: 'login', component: () => import('../views/LoginView.vue'), meta: { guest: true } },
+  { path: '/admin/login', name: 'admin-login', component: () => import('../views/AdminLoginView.vue'), meta: { adminGuest: true } },
+  { path: '/admin/cashier-pins', name: 'admin-cashier-pins', component: () => import('../views/AdminCashierPinsView.vue'), meta: { requiresAdmin: true } },
   { path: '/', name: 'pos', component: () => import('../views/PosView.vue'), meta: { requiresAuth: true } },
   { path: '/pos', redirect: '/' },
   { path: '/products', name: 'products', component: () => import('../views/ProductsView.vue'), meta: { requiresAuth: true } },
@@ -11,26 +13,21 @@ const routes = [
   { path: '/:pathMatch(.*)*', redirect: '/' },
 ]
 
-const router = createRouter({
-  history: createWebHistory(),
-  routes,
-})
+const router = createRouter({ history: createWebHistory(), routes })
 
 router.beforeEach(async (to) => {
   const auth = useAuthStore()
-  if (auth.loading) {
-    auth.init()
-  }
+  if (!auth.initialized) await auth.init()
 
-  // Jika butuh auth dan belum ada kasir aktif, arahkan ke login PIN
+  if (to.meta.requiresAdmin && !auth.admin) {
+    return { name: auth.cashier ? 'login' : 'admin-login' }
+  }
   if (to.meta.requiresAuth && !auth.cashier) {
-    return { name: 'login' }
+    return { name: auth.admin ? 'admin-cashier-pins' : 'login' }
   }
-
-  // Jika sudah login dan membuka halaman login, langsung arahkan ke POS
-  if (to.meta.guest && auth.cashier) {
-    return { name: 'pos' }
-  }
+  if (to.meta.adminGuest && auth.admin) return { name: 'admin-cashier-pins' }
+  if (to.meta.guest && auth.cashier) return { name: 'pos' }
+  if (to.meta.guest && auth.admin) return { name: 'admin-cashier-pins' }
 })
 
 export default router

@@ -1,91 +1,64 @@
-import { createClient } from '@sanity/client'
-import crypto from 'node:crypto'
+import { createServiceClient } from './_lib/database.js'
+import { HttpError, methodNotAllowed, publicError, sendJson, validateSameOrigin } from './_lib/http.js'
+import { fetchActiveCashierById, publicCashier } from './_lib/sanity.js'
+import { enforceRateLimits, clearRateLimits, pinRateLimitKeys } from './_lib/rate-limit.js'
+import { hashPin, verifyPin } from './_lib/passwords.js'
+import { createSessionToken, setSessionCookie } from './_lib/sessions.js'
 
-export async function verifyCashierPin(body, env = process.env) {
-  const { cashierId, pin } = body || {}
+export async function setCashierPin(supabase, cashierId, pin) {
+  if (typeof pin !== 'string' || !/^\d{4,6}$/.test(pin)) {
+    throw new HttpError(400, 'PIN must contain 4 to 6 digits')
+  }
+  const { salt, hash } = await hashPin(pin)
+  const { error } = await supabase.from('pos_cashier_pin_credentials').upsert({
+    cashier_id: cashierId,
+    pin_salt: salt,
+    pin_hash: hash,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: 'cashier_id' })
+  if (error) throw new HttpError(503, 'Secure PIN storage is temporarily unavailable')
+}
 
-  if (!cashierId || !pin) {
-    const err = new Error('ID Kasir dan PIN wajib diisi')
-    err.statusCode = 400
-    throw err
+export async function verifyCashierPin(body, env = process.env, req = { headers: {} }) {
+  const cashierId = typeof body?.cashierId === 'string' ? body.cashierId.trim() : ''
+  const pin = body?.pin
+  if (!/^[A-Za-z0-9._:-]{1,128}$/.test(cashierId) || typeof pin !== 'string' || !/^\d{4,6}$/.test(pin)) {
+    throw new HttpError(400, 'Enter a cashier profile and a 4–6 digit PIN')
   }
 
-  // Support fallback default kasir jika skema Sanity belum dideploy
-  if (cashierId === 'cashier-default-1' || cashierId === 'cashier-default-2') {
-    // PIN default: 1234
-    if (String(pin) !== '1234') {
-      const err = new Error('PIN tidak sesuai (Gunakan PIN default: 1234)')
-      err.statusCode = 401
-      throw err
-    }
-    const name = cashierId === 'cashier-default-1' ? 'Kasir Utama' : 'Supervisor Shift'
-    const role = cashierId === 'cashier-default-1' ? 'cashier' : 'supervisor'
-    return {
-      success: true,
-      token: `session-${crypto.randomBytes(16).toString('hex')}`,
-      cashier: { id: cashierId, name, role },
-    }
-  }
+  const supabase = createServiceClient(env)
+  const limits = pinRateLimitKeys(req, cashierId, env)
+  await enforceRateLimits(supabase, limits)
 
-  const projectId = env.SANITY_PROJECT_ID || env.VITE_SANITY_PROJECT_ID || 'aejzrj0n'
-  const dataset = env.SANITY_DATASET || env.VITE_SANITY_DATASET || 'production'
-  const apiVersion = env.SANITY_API_VERSION || '2025-02-06'
-  const token = env.SANITY_API_TOKEN
+  const [doc, credentialResult] = await Promise.all([
+    fetchActiveCashierById(cashierId, env),
+    supabase.from('pos_cashier_pin_credentials')
+      .select('pin_salt,pin_hash')
+      .eq('cashier_id', cashierId)
+      .maybeSingle(),
+  ])
+  if (credentialResult.error) throw new HttpError(503, 'Secure authentication is temporarily unavailable')
+  const stored = credentialResult.data
+  const validPin = stored && await verifyPin(pin, stored.pin_salt, stored.pin_hash)
+  if (!doc || !validPin) throw new HttpError(401, 'Cashier profile or PIN is not valid')
 
-  const client = createClient({
-    projectId,
-    dataset,
-    apiVersion,
-    token: token || undefined,
-    useCdn: false,
-  })
-
-  // Query verifikasi PIN di sisi server
-  const query = `*[_type == "cashier" && _id == $cashierId && isActive != false][0]{
-    _id,
-    name,
-    role,
-    pin
-  }`
-  const doc = await client.fetch(query, { cashierId })
-
-  if (!doc) {
-    const err = new Error('Kasir tidak ditemukan atau berstatus nonaktif')
-    err.statusCode = 404
-    throw err
-  }
-
-  // Verifikasi PIN
-  if (String(doc.pin).trim() !== String(pin).trim()) {
-    const err = new Error('PIN kasir tidak valid')
-    err.statusCode = 401
-    throw err
-  }
-
+  await clearRateLimits(supabase, limits)
+  const cashier = publicCashier(doc)
   return {
-    success: true,
-    token: `session-${crypto.randomBytes(16).toString('hex')}`,
-    cashier: {
-      id: doc._id,
-      name: doc.name,
-      role: doc.role || 'cashier',
-    },
+    cashier: { id: cashier.id, name: cashier.name, role: cashier.role },
+    token: createSessionToken({ id: cashier.id, name: cashier.name, role: 'cashier' }, env),
   }
 }
 
-export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    res.setHeader('Allow', 'POST')
-    return res.status(405).json({ error: 'Method Not Allowed' })
-  }
-
+export default async function handler(req, res, env = process.env) {
+  if (req.method !== 'POST') return methodNotAllowed(res, 'POST')
   try {
-    const result = await verifyCashierPin(req.body, process.env)
-    return res.status(200).json(result)
+    validateSameOrigin(req)
+    const result = await verifyCashierPin(req.body, env, req)
+    setSessionCookie(res, result.token, req, env, 'cashier')
+    return sendJson(res, 200, { success: true, cashier: result.cashier })
   } catch (error) {
-    const statusCode = error.statusCode || 500
-    return res.status(statusCode).json({
-      error: error.message || 'Terjadi kesalahan saat memverifikasi PIN',
-    })
+    const { statusCode, message } = publicError(error, 'PIN verification is temporarily unavailable')
+    return sendJson(res, statusCode, { error: message })
   }
 }
