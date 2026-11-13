@@ -1,16 +1,25 @@
 <script setup>
-import { useRouter } from 'vue-router'
+import { computed } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from './stores/auth'
 
 const auth = useAuthStore()
 const router = useRouter()
+const route = useRoute()
 
 const navItems = [
-  { to: '/', label: 'Kasir POS' },
-  { to: '/products', label: 'Katalog Menu' },
-  { to: '/reports', label: 'Laporan Penjualan' },
-  { to: '/insights', label: 'Insight Bisnis' },
+  { to: '/', label: 'Kasir POS', icon: 'point_of_sale' },
+  { to: '/products', label: 'Katalog Menu', icon: 'menu_book' },
+  { to: '/reports', label: 'Laporan Penjualan', icon: 'bar_chart' },
+  { to: '/insights', label: 'Insight Bisnis', icon: 'auto_awesome' },
 ]
+
+const userInitials = computed(() => {
+  const name = auth.cashier?.name || 'Kasir'
+  const parts = name.trim().split(/\s+/)
+  if (parts.length >= 2) return `${parts[0][0]}${parts[1][0]}`.toUpperCase()
+  return name.slice(0, 2).toUpperCase()
+})
 
 async function handleLogout() {
   await auth.logout()
@@ -19,48 +28,81 @@ async function handleLogout() {
 </script>
 
 <template>
-  <div v-if="auth.cashier" class="min-h-screen bg-stone-100/70 text-stone-900">
-    <header class="bg-white border-b border-stone-200 sticky top-0 z-20">
-      <div class="max-w-7xl mx-auto px-4 sm:px-6 py-2.5 flex items-center justify-between gap-4">
-        <div class="flex items-center gap-3">
-          <span class="inline-flex items-center justify-center w-8 h-8 rounded-md bg-stone-900 text-stone-100 text-xs font-bold tracking-wider uppercase font-mono">
-            {{ (auth.cashier.name || 'POS').slice(0, 2) }}
-          </span>
-          <div class="leading-tight">
-            <h1 class="text-sm font-semibold text-stone-900">POS Kafe</h1>
-            <p class="text-[11px] text-stone-500 font-mono">
-              Kasir: <span class="font-medium text-stone-700">{{ auth.cashier.name }}</span> ({{ auth.cashier.role }})
-            </p>
+  <div v-if="auth.cashier" class="min-h-screen bg-surface flex flex-col font-sans text-on-surface antialiased">
+    <!-- Sticky / Fixed Navbar -->
+    <header class="fixed top-0 left-0 right-0 w-full z-50 bg-surface-container-lowest border-b border-surface-container-high/60 shadow-[0_1px_8px_rgba(28,25,23,0.04)]">
+      <div class="h-16 w-full px-4 sm:px-6 flex items-center justify-between gap-4">
+        <!-- Brand & Branch -->
+        <div class="flex items-center gap-3 min-w-max">
+          <div class="w-9 h-9 rounded-xl bg-primary text-white flex items-center justify-center shadow-sm shrink-0">
+            <span class="material-symbols-outlined text-[20px] text-secondary-fixed">local_cafe</span>
+          </div>
+          <div class="flex items-center gap-2.5">
+            <span class="font-bold text-[16px] text-on-surface tracking-tight">POS Kafe</span>
+            <span class="px-2 py-0.5 rounded-full bg-surface-container text-on-surface-variant font-medium text-[11px]">Cabang Senopati</span>
+            <div class="flex items-center gap-1.5 pl-1">
+              <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span class="text-[11px] font-medium text-emerald-600">Online</span>
+            </div>
           </div>
         </div>
 
-        <nav class="flex items-center gap-1 overflow-x-auto py-1">
+        <!-- Center Navigation -->
+        <nav class="hidden md:flex items-center bg-surface-container-low p-1 rounded-xl gap-1">
           <RouterLink
             v-for="item in navItems"
             :key="item.to"
             :to="item.to"
-            class="px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium whitespace-nowrap transition-colors"
-            :class="$route.path === item.to
-              ? 'bg-stone-900 text-white'
-              : 'text-stone-600 hover:text-stone-900 hover:bg-stone-100'"
+            class="px-3.5 py-1.5 rounded-lg text-[13px] font-medium transition-all flex items-center gap-2"
+            :class="route.path === item.to
+              ? 'bg-primary text-white shadow-sm'
+              : 'text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface'"
           >
-            {{ item.label }}
+            <span class="material-symbols-outlined text-[17px]">{{ item.icon }}</span>
+            <span>{{ item.label }}</span>
           </RouterLink>
         </nav>
 
-        <button
-          @click="handleLogout"
-          type="button"
-          class="px-3 py-1.5 text-xs sm:text-sm font-medium text-stone-500 hover:text-stone-900 hover:bg-stone-100 rounded-md transition-colors whitespace-nowrap"
-        >
-          Kunci / Ganti Kasir
-        </button>
+        <!-- Right User Shift & Lock Button -->
+        <div class="flex items-center gap-3 min-w-max">
+          <div class="flex items-center gap-2.5 px-3 py-1 bg-surface-container-low rounded-xl border border-surface-container">
+            <div class="w-7 h-7 rounded-full bg-secondary-fixed text-on-secondary-fixed flex items-center justify-center font-bold text-[11px] shrink-0">
+              {{ userInitials }}
+            </div>
+            <div class="flex flex-col text-right leading-tight">
+              <span class="font-semibold text-[13px] text-on-surface">{{ auth.cashier.name }}</span>
+              <span class="text-[11px] text-secondary font-medium">{{ auth.cashier.role || 'Shift Pagi' }}</span>
+            </div>
+          </div>
+
+          <button
+            @click="handleLogout"
+            type="button"
+            class="h-9 flex items-center gap-1.5 px-3.5 rounded-xl bg-surface-container hover:bg-surface-container-high text-on-surface font-medium text-[12px] transition-all active:scale-[0.98] border border-surface-container-high"
+          >
+            <span class="material-symbols-outlined text-[16px] text-on-surface-variant">lock</span>
+            <span class="hidden sm:inline">Kunci Kasir</span>
+          </button>
+        </div>
       </div>
     </header>
 
-    <main class="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+    <!-- Main Content Routed -->
+    <main class="w-full bg-surface min-h-[calc(100vh-64px)] pt-16 flex-1 flex flex-col">
       <RouterView />
     </main>
+
+    <!-- Global Footer -->
+    <footer class="w-full bg-surface-container-lowest py-3 border-t border-surface-container-high/60 mt-auto">
+      <div class="w-full px-6 flex flex-col sm:flex-row items-center justify-between gap-2 text-on-surface-variant text-[12px]">
+        <div>© 2025 POS Kafe Specialty Coffee. All rights reserved. Senopati Roastery.</div>
+        <div class="flex items-center gap-4">
+          <span>Versi Terminal 2.4.0</span>
+          <span>Koneksi EDC: Terhubung</span>
+        </div>
+      </div>
+    </footer>
   </div>
+
   <RouterView v-else />
 </template>

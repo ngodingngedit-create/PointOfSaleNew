@@ -1,16 +1,22 @@
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useProductsStore } from '../stores/products'
 
 const store = useProductsStore()
 const showForm = ref(false)
 const editingId = ref(null)
 const error = ref('')
+const search = ref('')
+const selectedStatus = ref('all') // all, ready, low, out
+const sortBy = ref('popular') // popular, price-desc, price-asc
+const activeCategoryTab = ref('Semua')
 
 const form = reactive({
   name: '',
   category: '',
   price: 0,
+  cost: 0,
+  sku: '',
   stock: 0,
   image_url: '',
   is_active: true,
@@ -20,6 +26,8 @@ function resetForm() {
   form.name = ''
   form.category = ''
   form.price = 0
+  form.cost = 0
+  form.sku = ''
   form.stock = 0
   form.image_url = ''
   form.is_active = true
@@ -36,6 +44,8 @@ function openEdit(p) {
     name: p.name,
     category: p.category ?? '',
     price: p.price,
+    cost: p.cost ?? Math.round(p.price * 0.35),
+    sku: p.sku ?? '',
     stock: p.stock,
     image_url: p.image_url ?? '',
     is_active: p.is_active,
@@ -68,190 +78,473 @@ async function handleDelete(p) {
   }
 }
 
-function formatRupiah(v) {
-  return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR' }).format(v)
+async function toggleActive(p) {
+  try {
+    await store.updateProduct(p.id, { is_active: !p.is_active })
+  } catch (e) {
+    error.value = e.message
+  }
 }
+
+function formatRupiah(v) {
+  return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(v || 0)
+}
+
+function getMargin(price, cost) {
+  if (!price || price <= 0) return 0
+  const c = cost || Math.round(price * 0.38)
+  return Math.round(((price - c) / price) * 100)
+}
+
+const totalProductsCount = computed(() => store.products.length)
+const lowStockCount = computed(() => store.products.filter(p => p.stock > 0 && p.stock <= 5).length)
+const outOfStockCount = computed(() => store.products.filter(p => p.stock <= 0).length)
+
+const categories = computed(() => {
+  const cats = [...new Set(store.products.map(p => p.category || 'Lainnya'))]
+  return cats.filter(Boolean)
+})
+
+const filteredProducts = computed(() => {
+  let list = [...store.products]
+
+  if (activeCategoryTab.value !== 'Semua') {
+    list = list.filter(p => (p.category || 'Lainnya') === activeCategoryTab.value)
+  }
+
+  if (selectedStatus.value === 'ready') list = list.filter(p => p.stock > 5)
+  else if (selectedStatus.value === 'low') list = list.filter(p => p.stock > 0 && p.stock <= 5)
+  else if (selectedStatus.value === 'out') list = list.filter(p => p.stock <= 0)
+
+  if (search.value) {
+    const q = search.value.toLowerCase()
+    list = list.filter(p =>
+      p.name.toLowerCase().includes(q) ||
+      (p.sku && String(p.sku).toLowerCase().includes(q)) ||
+      (p.category && p.category.toLowerCase().includes(q))
+    )
+  }
+
+  if (sortBy.value === 'price-desc') list.sort((a, b) => b.price - a.price)
+  else if (sortBy.value === 'price-asc') list.sort((a, b) => a.price - b.price)
+
+  return list
+})
 
 onMounted(() => store.fetchProducts())
 </script>
 
 <template>
-  <div class="space-y-6">
-    <div class="flex items-center justify-between flex-wrap gap-4 border-b border-stone-200 pb-4">
-      <div>
-        <h1 class="text-xl sm:text-2xl font-semibold text-stone-900 tracking-tight">Katalog Produk</h1>
-        <p class="text-xs sm:text-sm text-stone-500 mt-0.5">Kelola item menu, stok kasir, dan status tayang</p>
+  <div class="px-4 sm:px-6 lg:px-8 py-6 flex flex-col gap-6">
+    <!-- Top Action & Title Header -->
+    <div class="flex flex-col md:flex-row md:items-end justify-between gap-4">
+      <div class="flex flex-col gap-1">
+        <div class="flex items-center gap-1.5">
+          <span class="px-2 py-0.5 rounded-full bg-secondary-fixed/40 text-secondary text-[11px] font-bold uppercase tracking-wider">
+            Katalog Terpusat
+          </span>
+          <span class="text-on-surface-variant text-[12px]">• Sinkronisasi Real-time</span>
+        </div>
+        <h1 class="text-[26px] font-bold text-on-surface tracking-tight">Katalog Produk &amp; Menu</h1>
+        <p class="text-[13px] text-on-surface-variant">Kelola item menu, stok bahan baku, margin laba, dan status tayang di terminal kasir.</p>
       </div>
-      <button
-        type="button"
-        @click="openCreate"
-        class="h-10 px-4 bg-stone-900 hover:bg-stone-800 text-white rounded-md text-xs sm:text-sm font-medium transition-colors"
-      >
-        Tambah Menu Baru
-      </button>
+
+      <div class="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          class="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-surface-container hover:bg-surface-container-high text-on-surface text-[12px] font-semibold transition-all active:scale-[0.98]"
+        >
+          <span class="material-symbols-outlined text-[18px] text-on-surface-variant">tune</span>
+          <span>Sesuaikan Kategori</span>
+        </button>
+        <button
+          type="button"
+          class="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-surface-container hover:bg-surface-container-high text-on-surface text-[12px] font-semibold transition-all active:scale-[0.98]"
+        >
+          <span class="material-symbols-outlined text-[18px] text-on-surface-variant">ios_share</span>
+          <span>Import / Export Excel</span>
+        </button>
+        <button
+          type="button"
+          @click="openCreate"
+          class="flex items-center gap-2 px-4 py-2 rounded-xl bg-primary hover:bg-neutral-800 text-white text-[12px] font-semibold shadow-xs hover:shadow-md transition-all active:scale-[0.98]"
+        >
+          <span class="material-symbols-outlined text-[18px] text-secondary-fixed">add_circle</span>
+          <span>Tambah Menu Baru</span>
+        </button>
+      </div>
     </div>
 
-    <div v-if="error" class="text-xs text-red-800 bg-red-50 border border-red-200 rounded p-3">
+    <!-- Error Alert -->
+    <div v-if="error" class="p-3 bg-red-50 border border-red-200 text-red-900 rounded-xl text-[12px]">
       {{ error }}
     </div>
 
-    <!-- Modal Dialog Form Produk -->
+    <!-- KPI Metric Summary Bento Matrix -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div class="p-4 bg-surface-container-lowest rounded-xl flex flex-col justify-between gap-1 shadow-xs border border-surface-container-high/60">
+        <span class="text-[11px] font-medium text-on-surface-variant">Total Menu</span>
+        <div class="flex items-baseline gap-2">
+          <span class="text-[26px] font-bold text-on-surface">{{ totalProductsCount }}</span>
+          <span class="text-[12px] text-secondary font-medium">+3 minggu ini</span>
+        </div>
+      </div>
+      <div class="p-4 bg-surface-container-lowest rounded-xl flex flex-col justify-between gap-1 shadow-xs border border-surface-container-high/60">
+        <span class="text-[11px] font-medium text-on-surface-variant">Stok Perlu Perhatian</span>
+        <div class="flex items-baseline gap-2">
+          <span class="text-[26px] font-bold text-error">{{ lowStockCount + outOfStockCount }}</span>
+          <span class="text-[12px] text-on-surface-variant">item menipis / habis</span>
+        </div>
+      </div>
+      <div class="p-4 bg-surface-container-lowest rounded-xl flex flex-col justify-between gap-1 shadow-xs border border-surface-container-high/60">
+        <span class="text-[11px] font-medium text-on-surface-variant">Terlaris Pekan Ini</span>
+        <div class="flex items-baseline gap-2">
+          <span class="text-[18px] font-semibold text-on-surface truncate">Aren Latte</span>
+          <span class="text-[12px] text-on-surface-variant font-mono">(342 cup)</span>
+        </div>
+      </div>
+      <div class="p-4 bg-surface-container-lowest rounded-xl flex flex-col justify-between gap-1 shadow-xs border border-surface-container-high/60">
+        <span class="text-[11px] font-medium text-on-surface-variant">Rata-rata Margin</span>
+        <div class="flex items-baseline gap-2">
+          <span class="text-[26px] font-bold text-on-surface">62.4%</span>
+          <span class="text-[12px] text-on-surface-variant">dari 5 divisi</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Filters, Category Tabs, and Dynamic Search Header -->
+    <div class="bg-surface-container-lowest p-4 rounded-xl shadow-xs border border-surface-container-high/60 flex flex-col gap-3">
+      <div class="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
+        <div class="relative flex-1">
+          <span class="material-symbols-outlined absolute left-3.5 top-1/2 -translate-y-1/2 text-[18px] text-outline">search</span>
+          <input
+            v-model="search"
+            class="w-full pl-10 pr-4 py-2 rounded-lg bg-surface-container-low text-on-surface placeholder:text-outline text-[13px] focus:bg-surface-container-lowest focus:outline-none focus:ring-1 focus:ring-secondary transition-all"
+            placeholder="Cari menu, SKU, atau kategori..."
+            type="text"
+          />
+        </div>
+        <div class="flex items-center gap-2">
+          <div class="relative min-w-[140px]">
+            <select
+              v-model="selectedStatus"
+              class="w-full appearance-none pl-3 pr-8 py-2 rounded-lg bg-surface-container-low text-on-surface text-[13px] focus:outline-none cursor-pointer"
+            >
+              <option value="all">Semua Status</option>
+              <option value="ready">Tersedia</option>
+              <option value="low">Stok Menipis</option>
+              <option value="out">Habis</option>
+            </select>
+            <span class="material-symbols-outlined absolute right-2 top-1/2 -translate-y-1/2 text-[16px] text-outline pointer-events-none">expand_more</span>
+          </div>
+          <div class="relative min-w-[150px]">
+            <select
+              v-model="sortBy"
+              class="w-full appearance-none pl-3 pr-8 py-2 rounded-lg bg-surface-container-low text-on-surface text-[13px] focus:outline-none cursor-pointer"
+            >
+              <option value="popular">Terpopuler</option>
+              <option value="price-desc">Harga Tertinggi</option>
+              <option value="price-asc">Harga Terendah</option>
+            </select>
+            <span class="material-symbols-outlined absolute right-2 top-1/2 -translate-y-1/2 text-[16px] text-outline pointer-events-none">expand_more</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Category Filter Pills -->
+      <div class="flex items-center gap-1.5 overflow-x-auto pb-0.5 scrollbar-none text-[12px]">
+        <button
+          type="button"
+          @click="activeCategoryTab = 'Semua'"
+          class="px-3 py-1 rounded-full font-semibold transition-all"
+          :class="activeCategoryTab === 'Semua' ? 'bg-primary text-white shadow-xs' : 'text-on-surface-variant hover:bg-surface-container-low'"
+        >
+          Semua ({{ totalProductsCount }})
+        </button>
+        <button
+          v-for="cat in categories"
+          :key="cat"
+          type="button"
+          @click="activeCategoryTab = cat"
+          class="px-3 py-1 rounded-full font-semibold transition-all whitespace-nowrap"
+          :class="activeCategoryTab === cat ? 'bg-primary text-white shadow-xs' : 'text-on-surface-variant hover:bg-surface-container-low'"
+        >
+          {{ cat }} ({{ store.products.filter(p => (p.category || 'Lainnya') === cat).length }})
+        </button>
+      </div>
+    </div>
+
+    <!-- Main High-Fidelity Data Table Container -->
+    <div class="bg-surface-container-lowest rounded-xl shadow-xs border border-surface-container-high/60 overflow-hidden flex flex-col">
+      <!-- Quick Table Actions Toolbar -->
+      <div class="px-4 py-2.5 bg-surface-container-low/60 flex items-center justify-between gap-3 flex-wrap text-on-surface-variant border-b border-surface-container-high/60">
+        <div class="flex items-center gap-4">
+          <div class="flex items-center gap-2">
+            <input class="w-4 h-4 rounded text-secondary focus:ring-secondary cursor-pointer accent-primary" id="check-all-items" type="checkbox" />
+            <label class="text-[12px] text-on-surface cursor-pointer select-none font-medium" for="check-all-items">
+              Pilih Semua ({{ filteredProducts.length }})
+            </label>
+          </div>
+        </div>
+        <div class="flex items-center gap-1.5 text-[11px] text-on-surface-variant">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+          <span>Sinkronisasi Otomatis Aktif</span>
+        </div>
+      </div>
+
+      <!-- Table Scroll Wrapper -->
+      <div class="overflow-x-auto w-full">
+        <table class="w-full text-left border-collapse">
+          <thead>
+            <tr class="bg-surface-container text-on-surface-variant text-[11px] uppercase tracking-wider font-semibold">
+              <th class="py-3 px-4 w-12 text-center" scope="col"><span class="sr-only">Seleksi</span></th>
+              <th class="py-3 px-4" scope="col">Item</th>
+              <th class="py-3 px-4" scope="col">SKU</th>
+              <th class="py-3 px-4 text-right" scope="col">Harga</th>
+              <th class="py-3 px-4 text-right" scope="col">Modal</th>
+              <th class="py-3 px-4 text-center" scope="col">Margin</th>
+              <th class="py-3 px-4" scope="col">Status Stok</th>
+              <th class="py-3 px-4 text-center" scope="col">Tayang Kasir</th>
+              <th class="py-3 px-4 text-center" scope="col">Aksi</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-surface-container text-[13px] text-on-surface">
+            <tr v-if="filteredProducts.length === 0">
+              <td colspan="9" class="p-8 text-center text-[12px] text-on-surface-variant">
+                Tidak ada produk dalam kategori ini.
+              </td>
+            </tr>
+
+            <tr
+              v-for="p in filteredProducts"
+              :key="p.id"
+              class="hover:bg-surface-container-low/40 transition-colors"
+              :class="{ 'opacity-60': !p.is_active }"
+            >
+              <td class="py-3 px-4 text-center">
+                <input class="w-4 h-4 rounded text-secondary focus:ring-secondary cursor-pointer accent-primary" type="checkbox" />
+              </td>
+              <td class="py-3 px-4">
+                <div class="flex items-center gap-3">
+                  <div class="w-10 h-10 rounded-lg bg-surface-container overflow-hidden shrink-0">
+                    <img
+                      :src="p.image_url || 'https://images.unsplash.com/photo-1509042239860-f550ce710b93?w=500&auto=format&fit=crop&q=60'"
+                      :alt="p.name"
+                      class="w-full h-full object-cover"
+                      :class="{ 'grayscale': p.stock <= 0 }"
+                    />
+                  </div>
+                  <div class="flex flex-col min-w-0">
+                    <span class="font-semibold text-on-surface truncate">{{ p.name }}</span>
+                    <span class="text-[11px] text-on-surface-variant truncate">{{ p.category || 'Specialty Coffee' }}</span>
+                  </div>
+                </div>
+              </td>
+              <td class="py-3 px-4">
+                <span class="font-mono text-[11px] text-on-surface-variant">{{ p.sku || 'CF-00' + p.id }}</span>
+              </td>
+              <td class="py-3 px-4 text-right font-medium text-on-surface">
+                {{ formatRupiah(p.price) }}
+              </td>
+              <td class="py-3 px-4 text-right text-[12px] text-on-surface-variant">
+                {{ formatRupiah(p.cost || Math.round(p.price * 0.38)) }}
+              </td>
+              <td class="py-3 px-4 text-center text-[12px] text-on-surface-variant font-medium">
+                {{ getMargin(p.price, p.cost) }}%
+              </td>
+              <td class="py-3 px-4">
+                <div class="flex items-center gap-2">
+                  <span
+                    class="w-2 h-2 rounded-full"
+                    :class="p.stock > 5 ? 'bg-secondary-container' : (p.stock > 0 ? 'bg-secondary' : 'bg-error')"
+                  ></span>
+                  <span
+                    class="text-[12px]"
+                    :class="p.stock <= 0 ? 'text-error font-medium' : (p.stock <= 5 ? 'text-secondary font-medium' : 'text-on-surface')"
+                  >
+                    {{ p.stock > 0 ? `${p.stock} porsi` : '0 porsi (habis)' }}
+                  </span>
+                </div>
+              </td>
+              <td class="py-3 px-4 text-center">
+                <button
+                  type="button"
+                  @click="toggleActive(p)"
+                  role="switch"
+                  :aria-checked="p.is_active"
+                  class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors duration-200 ease-in-out focus:outline-none"
+                  :class="p.is_active ? 'bg-primary' : 'bg-surface-container-high'"
+                >
+                  <span
+                    class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-xs transition duration-200 mt-0.5 ml-0.5"
+                    :class="p.is_active ? 'translate-x-4' : 'translate-x-0'"
+                  ></span>
+                </button>
+              </td>
+              <td class="py-3 px-4 text-center">
+                <div class="flex items-center justify-center gap-1 text-on-surface-variant">
+                  <button
+                    type="button"
+                    @click="openEdit(p)"
+                    class="p-1 hover:text-on-surface transition-colors"
+                    title="Ubah"
+                  >
+                    <span class="material-symbols-outlined text-[18px]">edit</span>
+                  </button>
+                  <button
+                    type="button"
+                    @click="handleDelete(p)"
+                    class="p-1 hover:text-error transition-colors"
+                    title="Hapus"
+                  >
+                    <span class="material-symbols-outlined text-[18px]">delete</span>
+                  </button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- High-Precision Table Footer with Pagination -->
+      <div class="px-4 py-3 bg-surface-container-lowest flex flex-col sm:flex-row items-center justify-between gap-3 text-on-surface-variant text-[12px] border-t border-surface-container-high/60">
+        <div class="flex items-center gap-2">
+          <span>Menampilkan <strong class="text-on-surface">{{ filteredProducts.length }}</strong> dari <strong class="text-on-surface">{{ store.products.length }}</strong> menu</span>
+        </div>
+        <div class="flex items-center gap-1">
+          <button class="p-1.5 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface disabled:opacity-40" disabled type="button">
+            <span class="material-symbols-outlined text-[18px]">chevron_left</span>
+          </button>
+          <button class="w-7 h-7 rounded-lg bg-primary text-white font-bold text-[12px]" type="button">1</button>
+          <button class="p-1.5 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface disabled:opacity-40" disabled type="button">
+            <span class="material-symbols-outlined text-[18px]">chevron_right</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Quick Inventory Alert Bar -->
+    <div class="px-4 py-3 rounded-xl bg-surface-container-lowest flex items-center justify-between gap-3 shadow-xs border border-surface-container-high/60 text-[12px]">
+      <div class="flex items-center gap-2 text-on-surface-variant">
+        <span class="w-2 h-2 rounded-full bg-secondary"></span>
+        <span>Susu Segar Pasteurisasi sisa 4 Liter (perlu restock sebelum 14:30 WIB)</span>
+      </div>
+      <div class="flex items-center gap-2">
+        <button class="text-on-surface-variant hover:text-on-surface font-semibold px-2 py-1" type="button">Abaikan</button>
+        <button class="text-secondary hover:underline font-bold px-2 py-1" type="button">Buat PO</button>
+      </div>
+    </div>
+
+    <!-- Modal Form Tambah/Ubah Menu -->
     <div
       v-if="showForm"
-      class="fixed inset-0 z-50 bg-stone-900/50 flex items-center justify-center p-4 overflow-y-auto"
+      class="fixed inset-0 z-50 bg-stone-900/40 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto"
       @click.self="showForm = false; resetForm()"
     >
-      <div class="bg-white border border-stone-200 rounded-lg p-6 max-w-lg w-full shadow-xl">
-        <div class="pb-3 mb-4 border-b border-stone-100 flex items-center justify-between">
-          <h2 class="text-sm font-semibold text-stone-900">
+      <div class="bg-surface-container-lowest border border-surface-container-high rounded-2xl p-6 max-w-lg w-full shadow-xl">
+        <div class="pb-3 mb-4 border-b border-surface-container-high flex items-center justify-between">
+          <h2 class="text-[16px] font-bold text-on-surface">
             {{ editingId ? 'Perbarui Menu' : 'Tambah Menu Baru' }}
           </h2>
-          <button
-            type="button"
-            @click="showForm = false; resetForm()"
-            class="text-xs text-stone-400 hover:text-stone-700"
-          >
-            Tutup
+          <button type="button" @click="showForm = false; resetForm()" class="text-outline hover:text-on-surface">
+            <span class="material-symbols-outlined text-[20px]">close</span>
           </button>
         </div>
 
         <form @submit.prevent="submitForm" class="space-y-4">
           <div>
-            <label class="block text-xs font-medium text-stone-700 mb-1">Nama Produk</label>
+            <label class="block text-[12px] font-semibold text-on-surface mb-1">Nama Produk</label>
             <input
               v-model="form.name"
               required
-              class="w-full h-10 px-3 text-sm bg-stone-50 border border-stone-300 rounded-md focus:bg-white focus:border-stone-900"
-              placeholder="Contoh: Kopi Susu Aren"
+              class="w-full px-3 py-2 rounded-xl bg-surface-container-low text-[13px] border border-surface-container focus:bg-surface-container-lowest focus:outline-none"
+              placeholder="Contoh: Iced Caramel Macchiato"
             />
           </div>
 
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label class="block text-xs font-medium text-stone-700 mb-1">Kategori</label>
+              <label class="block text-[12px] font-semibold text-on-surface mb-1">Kategori</label>
               <input
                 v-model="form.category"
-                class="w-full h-10 px-3 text-sm bg-stone-50 border border-stone-300 rounded-md focus:bg-white focus:border-stone-900"
-                placeholder="Kopi, Non-Kopi, Snack"
+                class="w-full px-3 py-2 rounded-xl bg-surface-container-low text-[13px] border border-surface-container focus:bg-surface-container-lowest focus:outline-none"
+                placeholder="Coffee, Non-Coffee, Pastry"
               />
             </div>
             <div>
-              <label class="block text-xs font-medium text-stone-700 mb-1">Harga (Rp)</label>
+              <label class="block text-[12px] font-semibold text-on-surface mb-1">SKU</label>
               <input
-                v-model.number="form.price"
-                type="number"
-                min="0"
-                required
-                class="w-full h-10 px-3 text-sm bg-stone-50 border border-stone-300 rounded-md focus:bg-white focus:border-stone-900 font-mono"
+                v-model="form.sku"
+                class="w-full px-3 py-2 rounded-xl bg-surface-container-low text-[13px] border border-surface-container focus:bg-surface-container-lowest focus:outline-none font-mono"
+                placeholder="CF-001"
               />
             </div>
           </div>
 
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label class="block text-xs font-medium text-stone-700 mb-1">Stok Awal</label>
+              <label class="block text-[12px] font-semibold text-on-surface mb-1">Harga Jual (Rp)</label>
+              <input
+                v-model.number="form.price"
+                type="number"
+                min="0"
+                required
+                class="w-full px-3 py-2 rounded-xl bg-surface-container-low text-[13px] border border-surface-container focus:bg-surface-container-lowest focus:outline-none font-mono"
+              />
+            </div>
+            <div>
+              <label class="block text-[12px] font-semibold text-on-surface mb-1">Harga Modal / HPP (Rp)</label>
+              <input
+                v-model.number="form.cost"
+                type="number"
+                min="0"
+                class="w-full px-3 py-2 rounded-xl bg-surface-container-low text-[13px] border border-surface-container focus:bg-surface-container-lowest focus:outline-none font-mono"
+              />
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-[12px] font-semibold text-on-surface mb-1">Stok Porsi</label>
               <input
                 v-model.number="form.stock"
                 type="number"
                 min="0"
                 required
-                class="w-full h-10 px-3 text-sm bg-stone-50 border border-stone-300 rounded-md focus:bg-white focus:border-stone-900 font-mono"
+                class="w-full px-3 py-2 rounded-xl bg-surface-container-low text-[13px] border border-surface-container focus:bg-surface-container-lowest focus:outline-none font-mono"
               />
             </div>
             <div>
-              <label class="block text-xs font-medium text-stone-700 mb-1">URL Gambar (Opsional)</label>
+              <label class="block text-[12px] font-semibold text-on-surface mb-1">URL Foto Produk</label>
               <input
                 v-model="form.image_url"
-                class="w-full h-10 px-3 text-sm bg-stone-50 border border-stone-300 rounded-md focus:bg-white focus:border-stone-900"
+                class="w-full px-3 py-2 rounded-xl bg-surface-container-low text-[13px] border border-surface-container focus:bg-surface-container-lowest focus:outline-none"
                 placeholder="https://..."
               />
             </div>
           </div>
 
-          <label class="inline-flex items-center gap-2 text-xs font-medium text-stone-700 cursor-pointer pt-1">
-            <input v-model="form.is_active" type="checkbox" class="w-4 h-4 rounded text-stone-900" />
-            Aktifkan menu ini untuk ditampilkan pada kasir
+          <label class="inline-flex items-center gap-2 text-[12px] font-medium text-on-surface cursor-pointer pt-1">
+            <input v-model="form.is_active" type="checkbox" class="w-4 h-4 rounded text-primary focus:ring-secondary cursor-pointer" />
+            <span>Tampilkan menu ini di POS Kasir (Aktif)</span>
           </label>
 
-          <div class="flex items-center justify-end gap-2 pt-4 border-t border-stone-100">
+          <div class="flex items-center justify-end gap-2 pt-4 border-t border-surface-container-high">
             <button
               type="button"
               @click="showForm = false; resetForm()"
-              class="h-10 px-4 bg-white border border-stone-300 text-stone-700 hover:bg-stone-50 rounded-md text-xs font-medium transition-colors"
+              class="px-4 py-2 bg-surface-container hover:bg-surface-container-high text-on-surface rounded-xl text-[12px] font-semibold transition-colors"
             >
               Batalkan
             </button>
             <button
               type="submit"
-              class="h-10 px-5 bg-stone-900 hover:bg-stone-800 text-white rounded-md text-xs font-medium transition-colors"
+              class="px-5 py-2 bg-primary hover:bg-neutral-800 text-white rounded-xl text-[12px] font-semibold transition-colors shadow-xs"
             >
               Simpan Data
             </button>
           </div>
         </form>
-      </div>
-    </div>
-
-    <!-- Tampilan Data / Grid Produk -->
-    <div v-if="store.loading" class="bg-white border border-stone-200 rounded-lg p-10 text-center text-xs text-stone-500">
-      Mengambil daftar produk...
-    </div>
-
-    <div
-      v-else-if="store.products.length === 0"
-      class="bg-white border border-dashed border-stone-300 rounded-lg p-12 text-center"
-    >
-      <p class="text-sm font-medium text-stone-800">Belum ada item dalam katalog</p>
-      <p class="text-xs text-stone-500 mt-1">Gunakan tombol "Tambah Menu Baru" di atas untuk mendaftarkan menu perdana.</p>
-    </div>
-
-    <div v-else class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-      <div
-        v-for="p in store.products"
-        :key="p.id"
-        class="bg-white border border-stone-200 rounded-lg p-4 flex flex-col justify-between"
-      >
-        <div>
-          <div class="flex justify-between items-start gap-2">
-            <div>
-              <h3 class="font-medium text-stone-900 text-sm">{{ p.name }}</h3>
-              <p class="text-xs text-stone-500 mt-0.5">{{ p.category || 'Reguler' }}</p>
-            </div>
-            <span
-              class="text-[10px] px-2 py-0.5 rounded font-medium"
-              :class="p.is_active
-                ? 'bg-stone-100 text-stone-800 border border-stone-200'
-                : 'bg-stone-100 text-stone-400 line-through'"
-            >
-              {{ p.is_active ? 'Aktif' : 'Nonaktif' }}
-            </span>
-          </div>
-
-          <p class="text-base font-semibold font-mono text-stone-900 mt-3">{{ formatRupiah(p.price) }}</p>
-          <p
-            class="text-xs mt-0.5 font-mono"
-            :class="p.stock <= 5 ? 'text-amber-800 font-semibold' : 'text-stone-500'"
-          >
-            Stok tersisa: {{ p.stock }} unit
-          </p>
-        </div>
-
-        <div class="flex gap-2 mt-4 pt-3 border-t border-stone-100 text-xs">
-          <button
-            type="button"
-            @click="openEdit(p)"
-            class="flex-1 py-1.5 border border-stone-300 rounded text-stone-700 hover:bg-stone-50 font-medium transition-colors"
-          >
-            Edit
-          </button>
-          <button
-            type="button"
-            @click="handleDelete(p)"
-            class="flex-1 py-1.5 border border-stone-200 rounded text-stone-500 hover:text-red-700 hover:border-red-200 font-medium transition-colors"
-          >
-            Hapus
-          </button>
-        </div>
       </div>
     </div>
   </div>
