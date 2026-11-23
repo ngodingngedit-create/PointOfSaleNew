@@ -64,6 +64,8 @@ test('AI receives only real selected-branch sales aggregates through Cloudflare 
   assert.equal(sent.store, false)
   assert.equal(sent.max_completion_tokens, 700)
   assert.deepEqual(sent.chat_template_kwargs, { enable_thinking: false })
+  assert.match(sent.messages[0].content, /nyatakan seri/)
+  assert.match(sent.messages[0].content, /quantitySold, bukan salesValueIDR/)
   const content = JSON.parse(sent.messages[1].content)
   assert.deepEqual(content.periode, { from: request.from, to: request.to })
   assert.equal(content.dataPenjualan.summary.sales, 60000)
