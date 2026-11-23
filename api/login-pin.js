@@ -6,8 +6,8 @@ import { hashPin, verifyPin } from './_lib/passwords.js'
 import { createSessionToken, setSessionCookie } from './_lib/sessions.js'
 
 export async function setCashierPin(supabase, cashierId, pin) {
-  if (typeof pin !== 'string' || !/^\d{4,6}$/.test(pin)) {
-    throw new HttpError(400, 'PIN must contain 4 to 6 digits')
+  if (typeof pin !== 'string' || !/^\d{4}$/.test(pin)) {
+    throw new HttpError(400, 'PIN must contain exactly 4 digits')
   }
   const { salt, hash } = await hashPin(pin)
   const { error } = await supabase.from('pos_cashier_pin_credentials').upsert({
@@ -22,8 +22,8 @@ export async function setCashierPin(supabase, cashierId, pin) {
 export async function verifyCashierPin(body, env = process.env, req = { headers: {} }) {
   const cashierId = typeof body?.cashierId === 'string' ? body.cashierId.trim() : ''
   const pin = body?.pin
-  if (!/^[A-Za-z0-9._:-]{1,128}$/.test(cashierId) || typeof pin !== 'string' || !/^\d{4,6}$/.test(pin)) {
-    throw new HttpError(400, 'Enter a cashier profile and a 4–6 digit PIN')
+  if (!/^[A-Za-z0-9._:-]{1,128}$/.test(cashierId) || typeof pin !== 'string' || !/^\d{4}$/.test(pin)) {
+    throw new HttpError(400, 'Enter a cashier profile and an exactly 4-digit PIN')
   }
 
   const supabase = createServiceClient(env)

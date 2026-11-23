@@ -27,13 +27,13 @@ async function loadCashiers() {
 }
 
 function keepDigits(cashier) {
-  cashier.newPin = String(cashier.newPin || '').replace(/\D/g, '').slice(0, 6)
+  cashier.newPin = String(cashier.newPin || '').replace(/\D/g, '').slice(0, 4)
 }
 
 async function savePin(cashier) {
   keepDigits(cashier)
-  if (!/^\d{4,6}$/.test(cashier.newPin)) {
-    error.value = 'A cashier PIN must contain 4 to 6 digits.'
+  if (!/^\d{4}$/.test(cashier.newPin)) {
+    error.value = 'A cashier PIN must contain exactly 4 digits.'
     notice.value = ''
     return
   }
@@ -128,10 +128,10 @@ onMounted(loadCashiers)
               type="password"
               inputmode="numeric"
               autocomplete="new-password"
-              pattern="[0-9]{4,6}"
+              pattern="[0-9]{4}"
               minlength="4"
-              maxlength="6"
-              placeholder="Enter a new 4–6 digit PIN"
+              maxlength="4"
+              placeholder="Enter a new 4-digit PIN"
               @input="keepDigits(cashier)"
               class="flex-1 min-w-0 h-10 px-3 text-sm font-mono tracking-widest bg-stone-50 border border-stone-300 rounded-md focus:bg-white focus:border-stone-900"
             />

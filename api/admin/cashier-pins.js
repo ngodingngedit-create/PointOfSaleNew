@@ -26,8 +26,8 @@ async function setPin(body, env) {
   const cashierId = typeof body?.cashierId === 'string' ? body.cashierId.trim() : ''
   if (!validCashierId(cashierId)) throw new HttpError(400, 'Select a valid cashier profile')
   const pin = body?.pin
-  if (typeof pin !== 'string' || !/^\d{4,6}$/.test(pin)) {
-    throw new HttpError(400, 'PIN must contain 4 to 6 digits')
+  if (typeof pin !== 'string' || !/^\d{4}$/.test(pin)) {
+    throw new HttpError(400, 'PIN must contain exactly 4 digits')
   }
   const cashier = await fetchActiveCashierById(cashierId, env)
   if (!cashier) throw new HttpError(404, 'Cashier profile was not found or is inactive')

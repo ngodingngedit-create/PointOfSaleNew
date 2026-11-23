@@ -22,7 +22,7 @@ function mockResponse() {
   }
 }
 
-test('cashier PINs are salted scrypt hashes and valid PIN length is enforced', async () => {
+test('cashier PINs are salted scrypt hashes and exactly 4 digits are enforced', async () => {
   const first = await hashPin('0427')
   const second = await hashPin('0427')
   assert.notEqual(first.salt, second.salt)
@@ -30,6 +30,8 @@ test('cashier PINs are salted scrypt hashes and valid PIN length is enforced', a
   assert.equal(await verifyPin('0427', first.salt, first.hash), true)
   assert.equal(await verifyPin('9999', first.salt, first.hash), false)
   assert.equal(await verifyPin('0427', 'bad-salt', first.hash), false)
+  assert.equal(/^\d{4}$/.test('12345'), false)
+  assert.equal(/^\d{4}$/.test('123'), false)
 })
 
 test('admin PIN writes persist only an independent salt and hash', async () => {
@@ -46,6 +48,7 @@ test('admin PIN writes persist only an independent salt and hash', async () => {
   assert.equal(stored.pin_hash.includes('0427'), false)
   assert.equal(await verifyPin('0427', stored.pin_salt, stored.pin_hash), true)
   await assert.rejects(() => setCashierPin(fakeSupabase, 'cashier-1', '123'))
+  await assert.rejects(() => setCashierPin(fakeSupabase, 'cashier-1', '12345'))
   await assert.rejects(() => setCashierPin(fakeSupabase, 'cashier-1', '12ab'))
 })
 
@@ -72,6 +75,17 @@ test('PIN login fails closed when the supplied existing Supabase project has no 
   await assert.rejects(
     () => verifyCashierPin({ cashierId: 'cashier-1', pin: '0427' }, { POS_SESSION_SECRET: TEST_SECRET }),
     (error) => error.statusCode === 503,
+  )
+})
+
+test('PIN login rejects values that are not exactly four digits', async () => {
+  await assert.rejects(
+    () => verifyCashierPin({ cashierId: 'cashier-1', pin: '12345' }, testEnv),
+    (error) => error.statusCode === 400,
+  )
+  await assert.rejects(
+    () => verifyCashierPin({ cashierId: 'cashier-1', pin: '123' }, testEnv),
+    (error) => error.statusCode === 400,
   )
 })
 
