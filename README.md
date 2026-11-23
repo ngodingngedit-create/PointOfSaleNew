@@ -35,6 +35,12 @@ npm run build
 
 PIN authentication uses Supabase RPC-backed 15-minute windows with limits by cashier/IP, cashier account, and IP; administrator sign-in is limited by admin account and IP. Reaching a threshold creates a 15-minute lockout. A missing project credential, SQL migration, password hash, or session secret yields a server error rather than enabling demo authentication.
 
+## Insight penjualan
+
+Insight mengambil transaksi `completed` dari cabang kasir dan periode yang dipilih (zona waktu Jakarta, maksimal 90 hari). Tidak ada data penjualan contoh atau jawaban pengganti. Periode kosong ditampilkan sebagai kosong; data yang tidak dapat diakses atau layanan AI yang gagal menghasilkan pesan error, bukan analisis palsu. Angka uji di `tests/` hanya fixture untuk pengujian lokal, tidak dimasukkan ke database atau aplikasi.
+
+Server mengirim pertanyaan dan agregat penjualan (total, harian, dan produk) ke Token Harbor, tanpa nama kasir atau identitas Member. Periksa ketentuan dan izin data model gratis di akun Token Harbor secara terpisah sebelum mengaktifkannya: [kebijakan privasi Token Harbor](https://tokenharbor.ai/privacy). Persetujuan tidak diaktifkan oleh aplikasi dan tidak ada fallback ke model berbayar. Jika secret Vercel atau pengaturannya berubah, perubahan itu berlaku pada deployment baru; jangan deploy production sebelum disetujui pemilik. Respons AI dapat keliru, jadi cocokkan angka dengan laporan penjualan.
+
 ## Data and checkout behavior
 
 Checkout verifies current prices, product variants/SKUs, stock revisions, cashier branch, table, and optional Member on the server. A private Supabase transaction is reserved before Sanity stock is decremented. A retry uses the same idempotency key; revision conflicts fail without recording a completed sale. If the system cannot determine whether a stock update completed, it marks the response as uncertain and does not repeat the decrement automatically. Reports include completed database transactions only; pending or failed checkouts are not counted as sales.

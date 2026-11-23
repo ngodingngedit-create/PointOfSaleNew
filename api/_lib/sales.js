@@ -22,6 +22,7 @@ export function jakartaDateString(date = new Date()) {
 export function resolveSalesRange(from, to, {maxDays = 366, defaultDays = 1, now = new Date()} = {}) {
   const today = jakartaDateString(now)
   const endDate = to || today
+  if (!isRealDate(endDate)) throw new HttpError(400, 'Rentang tanggal laporan tidak valid')
   let startDate = from
   if (!startDate) {
     const [year, month, day] = endDate.split('-').map(Number)
@@ -52,9 +53,9 @@ export async function loadCompletedSales(supabase, branchId, range) {
       .lt('completed_at', range.endExclusiveIso)
       .order('completed_at', { ascending: true })
       .range(offset, end)
-    if (error) throw new HttpError(503, 'Laporan penjualan sementara tidak tersedia')
-    rows.push(...(data || []))
-    if (!data || data.length < PAGE_SIZE) break
+    if (error || !Array.isArray(data)) throw new HttpError(503, 'Laporan penjualan sementara tidak tersedia')
+    rows.push(...data)
+    if (data.length < PAGE_SIZE) break
     if (offset + PAGE_SIZE >= MAX_TRANSACTIONS) truncated = true
   }
   return { transactions: rows, truncated }
