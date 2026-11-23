@@ -1,23 +1,29 @@
-# POS cashier PIN administration
+# POS kasir, Member, transaksi, dan keamanan PIN
 
-This version moves cashier PIN authentication to server-only API handlers. Cashier PINs are accepted only as 4–6 digits, converted to per-PIN salted scrypt hashes, and stored in the existing Supabase project. Sanity remains the public cashier directory; the login code reads only profile fields and never reads or writes a PIN there. The browser receives no bearer token and keeps no authentication state in `localStorage`; signed sessions use an `HttpOnly`, `SameSite=Strict` cookie, verified by the server. Checkout and PIN-management APIs require the appropriate server-validated role.
+Kasir memakai API server-only untuk PIN, Member, checkout, laporan, dan Insight. PIN di-hash dengan salt per PIN di Supabase. Data kontak Member dan ledger transaksi hanya disimpan/diakses melalui service role Supabase; browser tidak mendapat service key atau token sesi, dan autentikasi memakai cookie `HttpOnly`, `SameSite=Strict`. Sanity tetap menjadi katalog produk publik serta sumber konfigurasi cabang/meja.
 
-## Before enabling sign-in
+## Sebelum mengaktifkan sign-in dan checkout produksi
 
-The secure API intentionally fails closed until the existing Supabase project has been configured. No schema has been applied to the live project and no production deployment has been made. Do not enable the Vercel deployment until the migration and server-only settings below are complete.
+API sengaja fail-closed sampai skema Supabase Free yang sudah ada dan pengaturan server-only siap. Jangan deploy ke produksi sebelum langkah berikut selesai.
 
-1. In the SQL editor for the existing project `qrqwdrhogdiqdbzbhbcl`, run `supabase/migrations/20261103000000_pos_pin_security.sql`. It creates RLS-protected credential and rate-limit tables. Only the service role can access them; the anon and authenticated roles receive no table access or RPC permission.
-2. Set these **server-only** Vercel environment variables for the deployment:
+1. Pada project Supabase yang sudah ada (`qrqwdrhogdiqdbzbhbcl`, tetap di Free), jalankan `supabase/migrations/20261103000000_pos_pin_security.sql` lalu `supabase/migrations/20261123000000_pos_members_sales.sql`. Tabel Member, transaksi, dan item transaksi memakai RLS ketat; role `anon` dan `authenticated` tidak mendapat akses, sedangkan API server memakai service role.
+2. Set pengaturan **server-only** berikut di Vercel (bukan variabel `VITE_`):
    - `SUPABASE_URL=https://qrqwdrhogdiqdbzbhbcl.supabase.co`
-   - `SUPABASE_SERVICE_ROLE_KEY` — the service-role key from this existing Supabase project; never use a `VITE_` prefix and never put it in a client build.
-   - `POS_SESSION_SECRET` — at least 32 random bytes. Generate with `node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))"`.
-   - `POS_ADMIN_USERNAME` — choose a private administrator username.
-   - `POS_ADMIN_PASSWORD_HASH` — generate as shown below; the clear-text password is not stored in Vercel.
-3. Generate a strong administrator password hash from a terminal in this project with `npm run admin:hash`. Use a unique password of at least 12 characters. Copy the printed `POS_ADMIN_PASSWORD_HASH=...` assignment into the Vercel server environment, then close the terminal. Do not put the password or hash in frontend variables or source control.
-4. Configure the same variable names in a local ignored `.env.local` only if you need to test locally. `.env.example` contains placeholders; it is not a secrets file.
-5. Set a cashier PIN from `/admin/login` after the server settings and migration are active. Existing cashier profiles without a credential cannot sign in. There is no fallback or default PIN.
+   - `SUPABASE_SERVICE_ROLE_KEY` — service-role key dari project yang sama; jangan gunakan awalan `VITE_` dan jangan masukkan ke build browser.
+   - `POS_SESSION_SECRET` — setidaknya 32 byte acak. Buat dengan `node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))"`.
+   - `POS_ADMIN_USERNAME` — nama administrator privat yang dipilih pemilik.
+   - `SANITY_API_TOKEN` — token tulis server untuk pengurangan stok; jangan paparkan melalui `VITE_`.
+3. Buat password hash administrator dengan `npm run admin:hash`; gunakan password unik minimal 12 karakter dan simpan hanya hasil hash ke `POS_ADMIN_PASSWORD_HASH` di server.
+4. Untuk Insight saja, konfigurasi `TOKEN_HARBOR_POS_API_KEY` sebagai kunci POS terpisah. Model dipatok ke `mimo-v2.6-flash:free`, tanpa fallback berbayar, dan hanya mengirim agregat penjualan, bukan identitas/nomor Member. Jangan gunakan ulang kunci untuk bot atau layanan lain.
+5. Konfigurasi nama variabel server yang sama di `.env.local` yang diabaikan Git hanya bila perlu menguji API lokal. `.env.example` berisi placeholder, bukan secret. Jangan taruh service role, token tulis Sanity, atau kunci AI di variabel client.
+6. Di Sanity Studio, buat cabang aktif yang nyata, tautkan setiap kasir ke cabang, dan atur meja aktif. Tidak ada cabang/meja contoh dibuat. Dokumen produk yang sudah ada tidak diubah oleh revisi ini.
+7. Set PIN kasir dari `/admin/login` setelah migrasi PIN dan pengaturan server aktif. Profil kasir tanpa kredensial belum bisa login. Tidak ada PIN default/fallback.
 
-Apply all Vercel settings to the production environment only after you have approved a deployment. If `SANITY_PROJECT_ID`, `SANITY_DATASET`, or `SANITY_API_VERSION` are already configured, keep their existing public Free-dataset settings unchanged. `SANITY_API_TOKEN` is not used for PIN authentication and must not be moved to any `VITE_` variable.
+Keep the existing public Sanity Free dataset settings unchanged. Do not store Member PII or transaction values in Sanity. Checkout creates opaque stock-application markers in the public dataset so a retry can be checked without decrementing stock twice; markers contain no customer, item, or price details. Apply production environment settings only after the deployment is approved.
+
+## Sanity Studio
+
+Source Studio ada di `studio-sanity-baru/` agar schema cabang, meja, dan relasi kasir dapat ikut disinkronkan melalui repository ini. Jalankan `npm ci` lalu `npm run build` di direktori tersebut. Deploy Studio ke project yang sama hanya dengan akun yang berwenang; jangan sertakan `.env.local`, token, atau hasil build dalam Git. Buat hanya data cabang, meja, dan kasir yang sebenarnya.
 
 ## Local checks
 
@@ -29,6 +35,6 @@ npm run build
 
 PIN authentication uses Supabase RPC-backed 15-minute windows with limits by cashier/IP, cashier account, and IP; administrator sign-in is limited by admin account and IP. Reaching a threshold creates a 15-minute lockout. A missing project credential, SQL migration, password hash, or session secret yields a server error rather than enabling demo authentication.
 
-## Existing checkout limitations not changed here
+## Data and checkout behavior
 
-The uploaded project’s existing checkout flow still stores idempotency keys in a per-process memory map and the browser generates a new key for each checkout call. This does not reliably deduplicate a retry across serverless instances or after a timeout. Also, stock is read and checked before an unconditional Sanity decrement, so simultaneous checkouts can oversell. These transaction-integrity issues are outside the PIN/admin change and need a separate design before treating checkout as strongly idempotent or inventory-atomic.
+Checkout verifies current prices, product variants/SKUs, stock revisions, cashier branch, table, and optional Member on the server. A private Supabase transaction is reserved before Sanity stock is decremented. A retry uses the same idempotency key; revision conflicts fail without recording a completed sale. If the system cannot determine whether a stock update completed, it marks the response as uncertain and does not repeat the decrement automatically. Reports include completed database transactions only; pending or failed checkouts are not counted as sales.

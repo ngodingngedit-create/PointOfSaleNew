@@ -40,6 +40,18 @@ export function adminRateLimitKeys(req, env = process.env) {
   ]
 }
 
+export function memberRateLimitKeys(req, session, env = process.env) {
+  const ip = getIp(req)
+  return [
+    { key: keyedHash(`member:session:${session.id}`, env), maxAttempts: 40 },
+    { key: keyedHash(`member:ip:${ip}`, env), maxAttempts: 60 },
+  ]
+}
+
+export function insightRateLimitKeys(session, env = process.env) {
+  return [{ key: keyedHash(`insight:session:${session.id}`, env), maxAttempts: 20 }]
+}
+
 export async function enforceRateLimits(supabase, limits) {
   for (const limit of limits) {
     const { data, error } = await supabase.rpc('pos_rate_limit_check', {

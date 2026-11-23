@@ -8,7 +8,7 @@ const editingId = ref(null)
 const error = ref('')
 const search = ref('')
 const selectedStatus = ref('all') // all, ready, low, out
-const sortBy = ref('popular') // popular, price-desc, price-asc
+const sortBy = ref('name-asc') // name-asc, price-desc, price-asc
 const activeCategoryTab = ref('Semua')
 
 const form = reactive({
@@ -44,7 +44,7 @@ function openEdit(p) {
     name: p.name,
     category: p.category ?? '',
     price: p.price,
-    cost: p.cost ?? Math.round(p.price * 0.35),
+    cost: p.cost ?? 0,
     sku: p.sku ?? '',
     stock: p.stock,
     image_url: p.image_url ?? '',
@@ -91,14 +91,10 @@ function formatRupiah(v) {
 }
 
 function getMargin(price, cost) {
-  if (!price || price <= 0) return 0
-  const c = cost || Math.round(price * 0.38)
-  return Math.round(((price - c) / price) * 100)
+  if (price === null || price === undefined || Number(price) <= 0) return null
+  if (cost === null || cost === undefined || cost === '') return null
+  return Math.round(((Number(price) - Number(cost)) / Number(price)) * 100)
 }
-
-const totalProductsCount = computed(() => store.products.length)
-const lowStockCount = computed(() => store.products.filter(p => p.stock > 0 && p.stock <= 5).length)
-const outOfStockCount = computed(() => store.products.filter(p => p.stock <= 0).length)
 
 const categories = computed(() => {
   const cats = [...new Set(store.products.map(p => p.category || 'Lainnya'))]
@@ -125,7 +121,8 @@ const filteredProducts = computed(() => {
     )
   }
 
-  if (sortBy.value === 'price-desc') list.sort((a, b) => b.price - a.price)
+  if (sortBy.value === 'name-asc') list.sort((a, b) => a.name.localeCompare(b.name, 'id'))
+  else if (sortBy.value === 'price-desc') list.sort((a, b) => b.price - a.price)
   else if (sortBy.value === 'price-asc') list.sort((a, b) => a.price - b.price)
 
   return list
@@ -139,31 +136,11 @@ onMounted(() => store.fetchProducts())
     <!-- Top Action & Title Header -->
     <div class="flex flex-col md:flex-row md:items-end justify-between gap-4">
       <div class="flex flex-col gap-1">
-        <div class="flex items-center gap-1.5">
-          <span class="px-2 py-0.5 rounded-full bg-secondary-fixed/40 text-secondary text-[11px] font-bold uppercase tracking-wider">
-            Katalog Terpusat
-          </span>
-          <span class="text-on-surface-variant text-[12px]">• Sinkronisasi Real-time</span>
-        </div>
         <h1 class="text-[26px] font-bold text-on-surface tracking-tight">Katalog Produk &amp; Menu</h1>
         <p class="text-[13px] text-on-surface-variant">Kelola item menu, stok bahan baku, margin laba, dan status tayang di terminal kasir.</p>
       </div>
 
       <div class="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          class="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-surface-container hover:bg-surface-container-high text-on-surface text-[12px] font-semibold transition-all active:scale-[0.98]"
-        >
-          <span class="material-symbols-outlined text-[18px] text-on-surface-variant">tune</span>
-          <span>Sesuaikan Kategori</span>
-        </button>
-        <button
-          type="button"
-          class="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-surface-container hover:bg-surface-container-high text-on-surface text-[12px] font-semibold transition-all active:scale-[0.98]"
-        >
-          <span class="material-symbols-outlined text-[18px] text-on-surface-variant">ios_share</span>
-          <span>Import / Export Excel</span>
-        </button>
         <button
           type="button"
           @click="openCreate"
@@ -178,38 +155,6 @@ onMounted(() => store.fetchProducts())
     <!-- Error Alert -->
     <div v-if="error" class="p-3 bg-red-50 border border-red-200 text-red-900 rounded-xl text-[12px]">
       {{ error }}
-    </div>
-
-    <!-- KPI Metric Summary Bento Matrix -->
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-      <div class="p-4 bg-surface-container-lowest rounded-xl flex flex-col justify-between gap-1 shadow-xs border border-surface-container-high/60">
-        <span class="text-[11px] font-medium text-on-surface-variant">Total Menu</span>
-        <div class="flex items-baseline gap-2">
-          <span class="text-[26px] font-bold text-on-surface">{{ totalProductsCount }}</span>
-          <span class="text-[12px] text-secondary font-medium">+3 minggu ini</span>
-        </div>
-      </div>
-      <div class="p-4 bg-surface-container-lowest rounded-xl flex flex-col justify-between gap-1 shadow-xs border border-surface-container-high/60">
-        <span class="text-[11px] font-medium text-on-surface-variant">Stok Perlu Perhatian</span>
-        <div class="flex items-baseline gap-2">
-          <span class="text-[26px] font-bold text-error">{{ lowStockCount + outOfStockCount }}</span>
-          <span class="text-[12px] text-on-surface-variant">item menipis / habis</span>
-        </div>
-      </div>
-      <div class="p-4 bg-surface-container-lowest rounded-xl flex flex-col justify-between gap-1 shadow-xs border border-surface-container-high/60">
-        <span class="text-[11px] font-medium text-on-surface-variant">Terlaris Pekan Ini</span>
-        <div class="flex items-baseline gap-2">
-          <span class="text-[18px] font-semibold text-on-surface truncate">Aren Latte</span>
-          <span class="text-[12px] text-on-surface-variant font-mono">(342 cup)</span>
-        </div>
-      </div>
-      <div class="p-4 bg-surface-container-lowest rounded-xl flex flex-col justify-between gap-1 shadow-xs border border-surface-container-high/60">
-        <span class="text-[11px] font-medium text-on-surface-variant">Rata-rata Margin</span>
-        <div class="flex items-baseline gap-2">
-          <span class="text-[26px] font-bold text-on-surface">62.4%</span>
-          <span class="text-[12px] text-on-surface-variant">dari 5 divisi</span>
-        </div>
-      </div>
     </div>
 
     <!-- Filters, Category Tabs, and Dynamic Search Header -->
@@ -242,7 +187,7 @@ onMounted(() => store.fetchProducts())
               v-model="sortBy"
               class="w-full appearance-none pl-3 pr-8 py-2 rounded-lg bg-surface-container-low text-on-surface text-[13px] focus:outline-none cursor-pointer"
             >
-              <option value="popular">Terpopuler</option>
+              <option value="name-asc">Nama A–Z</option>
               <option value="price-desc">Harga Tertinggi</option>
               <option value="price-asc">Harga Terendah</option>
             </select>
@@ -259,7 +204,7 @@ onMounted(() => store.fetchProducts())
           class="px-3 py-1 rounded-full font-semibold transition-all"
           :class="activeCategoryTab === 'Semua' ? 'bg-primary text-white shadow-xs' : 'text-on-surface-variant hover:bg-surface-container-low'"
         >
-          Semua ({{ totalProductsCount }})
+          Semua
         </button>
         <button
           v-for="cat in categories"
@@ -269,35 +214,18 @@ onMounted(() => store.fetchProducts())
           class="px-3 py-1 rounded-full font-semibold transition-all whitespace-nowrap"
           :class="activeCategoryTab === cat ? 'bg-primary text-white shadow-xs' : 'text-on-surface-variant hover:bg-surface-container-low'"
         >
-          {{ cat }} ({{ store.products.filter(p => (p.category || 'Lainnya') === cat).length }})
+          {{ cat }}
         </button>
       </div>
     </div>
 
     <!-- Main High-Fidelity Data Table Container -->
     <div class="bg-surface-container-lowest rounded-xl shadow-xs border border-surface-container-high/60 overflow-hidden flex flex-col">
-      <!-- Quick Table Actions Toolbar -->
-      <div class="px-4 py-2.5 bg-surface-container-low/60 flex items-center justify-between gap-3 flex-wrap text-on-surface-variant border-b border-surface-container-high/60">
-        <div class="flex items-center gap-4">
-          <div class="flex items-center gap-2">
-            <input class="w-4 h-4 rounded text-secondary focus:ring-secondary cursor-pointer accent-primary" id="check-all-items" type="checkbox" />
-            <label class="text-[12px] text-on-surface cursor-pointer select-none font-medium" for="check-all-items">
-              Pilih Semua ({{ filteredProducts.length }})
-            </label>
-          </div>
-        </div>
-        <div class="flex items-center gap-1.5 text-[11px] text-on-surface-variant">
-          <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-          <span>Sinkronisasi Otomatis Aktif</span>
-        </div>
-      </div>
-
       <!-- Table Scroll Wrapper -->
       <div class="overflow-x-auto w-full">
         <table class="w-full text-left border-collapse">
           <thead>
             <tr class="bg-surface-container text-on-surface-variant text-[11px] uppercase tracking-wider font-semibold">
-              <th class="py-3 px-4 w-12 text-center" scope="col"><span class="sr-only">Seleksi</span></th>
               <th class="py-3 px-4" scope="col">Item</th>
               <th class="py-3 px-4" scope="col">SKU</th>
               <th class="py-3 px-4 text-right" scope="col">Harga</th>
@@ -309,10 +237,14 @@ onMounted(() => store.fetchProducts())
             </tr>
           </thead>
           <tbody class="divide-y divide-surface-container text-[13px] text-on-surface">
-            <tr v-if="filteredProducts.length === 0">
-              <td colspan="9" class="p-8 text-center text-[12px] text-on-surface-variant">
-                Tidak ada produk dalam kategori ini.
-              </td>
+            <tr v-if="store.loading && store.products.length === 0">
+              <td colspan="8" class="p-8 text-center text-[12px] text-on-surface-variant">Memuat katalog produk…</td>
+            </tr>
+            <tr v-else-if="store.error && store.products.length === 0">
+              <td colspan="8" class="p-8 text-center text-[12px] text-error">Katalog tidak dapat dimuat: {{ store.error }}</td>
+            </tr>
+            <tr v-else-if="filteredProducts.length === 0">
+              <td colspan="8" class="p-8 text-center text-[12px] text-on-surface-variant">{{ store.products.length ? 'Tidak ada produk yang sesuai dengan filter.' : 'Belum ada produk pada katalog.' }}</td>
             </tr>
 
             <tr
@@ -321,36 +253,35 @@ onMounted(() => store.fetchProducts())
               class="hover:bg-surface-container-low/40 transition-colors"
               :class="{ 'opacity-60': !p.is_active }"
             >
-              <td class="py-3 px-4 text-center">
-                <input class="w-4 h-4 rounded text-secondary focus:ring-secondary cursor-pointer accent-primary" type="checkbox" />
-              </td>
               <td class="py-3 px-4">
                 <div class="flex items-center gap-3">
                   <div class="w-10 h-10 rounded-lg bg-surface-container overflow-hidden shrink-0">
                     <img
-                      :src="p.image_url || 'https://images.unsplash.com/photo-1509042239860-f550ce710b93?w=500&auto=format&fit=crop&q=60'"
+                      v-if="p.image_url"
+                      :src="p.image_url"
                       :alt="p.name"
                       class="w-full h-full object-cover"
                       :class="{ 'grayscale': p.stock <= 0 }"
                     />
+                    <div v-else class="w-full h-full flex items-center justify-center text-outline"><span class="material-symbols-outlined">inventory_2</span></div>
                   </div>
                   <div class="flex flex-col min-w-0">
                     <span class="font-semibold text-on-surface truncate">{{ p.name }}</span>
-                    <span class="text-[11px] text-on-surface-variant truncate">{{ p.category || 'Specialty Coffee' }}</span>
+                    <span class="text-[11px] text-on-surface-variant truncate">{{ p.category || 'Tanpa kategori' }}</span>
                   </div>
                 </div>
               </td>
               <td class="py-3 px-4">
-                <span class="font-mono text-[11px] text-on-surface-variant">{{ p.sku || 'CF-00' + p.id }}</span>
+                <span class="font-mono text-[11px] text-on-surface-variant">{{ p.sku || '—' }}</span>
               </td>
               <td class="py-3 px-4 text-right font-medium text-on-surface">
                 {{ formatRupiah(p.price) }}
               </td>
               <td class="py-3 px-4 text-right text-[12px] text-on-surface-variant">
-                {{ formatRupiah(p.cost || Math.round(p.price * 0.38)) }}
+                {{ p.cost !== null && p.cost !== undefined ? formatRupiah(p.cost) : '—' }}
               </td>
               <td class="py-3 px-4 text-center text-[12px] text-on-surface-variant font-medium">
-                {{ getMargin(p.price, p.cost) }}%
+                {{ getMargin(p.price, p.cost) === null ? '—' : `${getMargin(p.price, p.cost)}%` }}
               </td>
               <td class="py-3 px-4">
                 <div class="flex items-center gap-2">
@@ -406,33 +337,6 @@ onMounted(() => store.fetchProducts())
         </table>
       </div>
 
-      <!-- High-Precision Table Footer with Pagination -->
-      <div class="px-4 py-3 bg-surface-container-lowest flex flex-col sm:flex-row items-center justify-between gap-3 text-on-surface-variant text-[12px] border-t border-surface-container-high/60">
-        <div class="flex items-center gap-2">
-          <span>Menampilkan <strong class="text-on-surface">{{ filteredProducts.length }}</strong> dari <strong class="text-on-surface">{{ store.products.length }}</strong> menu</span>
-        </div>
-        <div class="flex items-center gap-1">
-          <button class="p-1.5 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface disabled:opacity-40" disabled type="button">
-            <span class="material-symbols-outlined text-[18px]">chevron_left</span>
-          </button>
-          <button class="w-7 h-7 rounded-lg bg-primary text-white font-bold text-[12px]" type="button">1</button>
-          <button class="p-1.5 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface disabled:opacity-40" disabled type="button">
-            <span class="material-symbols-outlined text-[18px]">chevron_right</span>
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Quick Inventory Alert Bar -->
-    <div class="px-4 py-3 rounded-xl bg-surface-container-lowest flex items-center justify-between gap-3 shadow-xs border border-surface-container-high/60 text-[12px]">
-      <div class="flex items-center gap-2 text-on-surface-variant">
-        <span class="w-2 h-2 rounded-full bg-secondary"></span>
-        <span>Susu Segar Pasteurisasi sisa 4 Liter (perlu restock sebelum 14:30 WIB)</span>
-      </div>
-      <div class="flex items-center gap-2">
-        <button class="text-on-surface-variant hover:text-on-surface font-semibold px-2 py-1" type="button">Abaikan</button>
-        <button class="text-secondary hover:underline font-bold px-2 py-1" type="button">Buat PO</button>
-      </div>
     </div>
 
     <!-- Modal Form Tambah/Ubah Menu -->

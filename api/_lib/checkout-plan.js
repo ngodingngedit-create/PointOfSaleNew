@@ -76,7 +76,7 @@ export function buildCheckoutPlan(requestedLines, dbProducts) {
       if (!Number.isFinite(stock) || stock < 0) {
         throw checkoutError(409, `Data stok untuk "${product.name}" tidak valid`)
       }
-      if (priceValue === null || priceValue === undefined || priceValue === '' || !Number.isFinite(price) || price < 0) {
+      if (priceValue === null || priceValue === undefined || priceValue === '' || !Number.isSafeInteger(price) || price < 0) {
         throw checkoutError(409, `Data harga untuk "${product.name}" tidak valid`)
       }
       if (hasVariantStock) {

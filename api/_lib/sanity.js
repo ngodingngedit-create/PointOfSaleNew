@@ -8,7 +8,7 @@ function getSanityClient(env = process.env) {
   return createClient({ projectId, dataset, apiVersion, useCdn: false })
 }
 
-const CASHIER_FIELDS = `_id, name, role, avatar`
+const CASHIER_FIELDS = `_id, name, role, avatar, "branch": branch->{_id, name, isActive}`
 
 export async function fetchActiveCashiers(env = process.env) {
   try {
@@ -28,6 +28,32 @@ export async function fetchActiveCashierById(cashierId, env = process.env) {
   }
 }
 
+export async function fetchActiveTablesForBranch(branchId, env = process.env) {
+  if (!branchId) return []
+  try {
+    const client = getSanityClient(env)
+    return await client.fetch(
+      `*[_type == "cafeTable" && isActive != false && branch._ref == $branchId]{_id,name,sortOrder} | order(sortOrder asc, name asc)`,
+      { branchId },
+    )
+  } catch {
+    throw new HttpError(503, 'Daftar meja cabang tidak tersedia')
+  }
+}
+
+export async function fetchActiveTableForBranch(tableId, branchId, env = process.env) {
+  if (!tableId || !branchId) return null
+  try {
+    const client = getSanityClient(env)
+    return await client.fetch(
+      `*[_type == "cafeTable" && _id == $tableId && isActive != false && branch._ref == $branchId][0]{_id,name}`,
+      { tableId, branchId },
+    )
+  } catch {
+    throw new HttpError(503, 'Data meja cabang tidak tersedia')
+  }
+}
+
 export function publicCashier(doc) {
   if (!doc) return null
   return {
@@ -35,5 +61,8 @@ export function publicCashier(doc) {
     name: String(doc.name || 'Cashier').slice(0, 120),
     role: String(doc.role || 'cashier').slice(0, 40),
     avatar: typeof doc.avatar === 'string' ? doc.avatar.slice(0, 8) : '',
+    branchId: typeof doc.branch?._id === 'string' ? doc.branch._id : null,
+    branchName: typeof doc.branch?.name === 'string' ? doc.branch.name.slice(0, 100) : null,
+    branchActive: doc.branch ? doc.branch.isActive !== false : false,
   }
 }

@@ -2,7 +2,6 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { isSanityConfigured, PRODUCT_QUERY, sanityClient } from '../lib/sanity'
 import { normalizeSanityProduct } from '../lib/product'
-import { supabase } from '../lib/supabase'
 
 export const useProductsStore = defineStore('products', () => {
   const products = ref([])
@@ -13,19 +12,10 @@ export const useProductsStore = defineStore('products', () => {
     loading.value = true
     error.value = ''
     try {
-      if (isSanityConfigured && sanityClient) {
-        // Query hanya produk aktif dari dataset publik Sanity
-        const sanityData = await sanityClient.fetch(PRODUCT_QUERY)
-        products.value = (sanityData || []).map(normalizeSanityProduct)
-      } else {
-        const { data, error: supaError } = await supabase
-          .from('products')
-          .select('*')
-          .eq('is_active', true)
-          .order('name')
-        if (supaError) throw supaError
-        products.value = data ?? []
-      }
+      if (!isSanityConfigured || !sanityClient) throw new Error('Katalog Sanity belum dikonfigurasi.')
+      // Query hanya produk aktif dari dataset publik Sanity; jangan menampilkan data contoh.
+      const sanityData = await sanityClient.fetch(PRODUCT_QUERY)
+      products.value = (sanityData || []).map(normalizeSanityProduct)
     } catch (err) {
       error.value = err.message || 'Gagal memuat katalog produk'
       console.error('Fetch products error:', err)

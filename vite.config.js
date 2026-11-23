@@ -8,6 +8,10 @@ import session from './api/session.js'
 import logout from './api/logout.js'
 import adminLogin from './api/admin/login.js'
 import adminCashierPins from './api/admin/cashier-pins.js'
+import branches from './api/branches.js'
+import members from './api/members.js'
+import reports from './api/reports.js'
+import insight from './api/insight.js'
 
 const API_HANDLERS = new Map([
   ['/api/cashiers', cashierDirectory],
@@ -17,6 +21,10 @@ const API_HANDLERS = new Map([
   ['/api/logout', logout],
   ['/api/admin/login', adminLogin],
   ['/api/admin/cashier-pins', adminCashierPins],
+  ['/api/branches', branches],
+  ['/api/members', members],
+  ['/api/reports', reports],
+  ['/api/insight', insight],
 ])
 
 function apiMiddleware(env) {
