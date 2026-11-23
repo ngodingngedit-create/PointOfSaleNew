@@ -23,7 +23,7 @@ function deps(overrides = {}) {
     createServiceClient: () => ({}),
     enforceRateLimits: async () => {},
     loadCompletedSales: async () => ({ transactions: sales, truncated: false }),
-    fetch: async () => new Response(JSON.stringify({ choices: [{ message: { content: 'Ringkasan dari data transaksi.' } }] }), { status: 200 }),
+    fetch: async () => new Response(JSON.stringify({ model: '@cf/zai-org/glm-4.7-flash', choices: [{ message: { content: 'Ringkasan dari data transaksi.' } }] }), { status: 200 }),
     ...overrides,
   }
 }
@@ -50,7 +50,7 @@ test('AI receives only real selected-branch sales aggregates through Cloudflare 
       requestHeaders = options.headers
       requestCache = options.cache
       sent = JSON.parse(options.body)
-      return new Response(JSON.stringify({ choices: [{ message: { content: 'Ringkasan dari data transaksi.' } }] }), { status: 200 })
+      return new Response(JSON.stringify({ model: '@cf/zai-org/glm-4.7-flash', choices: [{ message: { content: 'Ringkasan dari data transaksi.' } }] }), { status: 200 })
     },
   }))
   assert.equal(branch, 'branch-1')
@@ -63,6 +63,7 @@ test('AI receives only real selected-branch sales aggregates through Cloudflare 
   assert.equal(sent.stream, false)
   assert.equal(sent.store, false)
   assert.equal(sent.max_completion_tokens, 700)
+  assert.deepEqual(sent.chat_template_kwargs, { enable_thinking: false })
   const content = JSON.parse(sent.messages[1].content)
   assert.deepEqual(content.periode, { from: request.from, to: request.to })
   assert.equal(content.dataPenjualan.summary.sales, 60000)
@@ -135,9 +136,16 @@ test('provider quota, access and service failures remain safe errors with no fal
 })
 
 test('malformed, blank, or unavailable AI answers remain errors rather than mock insight', async () => {
-  for (const [body, code] of [['not-json', 'ai_invalid_response'], [JSON.stringify({ choices: [{ message: { content: '' } }] }), 'ai_empty_response']]) {
+  for (const [body, code] of [['not-json', 'ai_invalid_response'], [JSON.stringify({ model: '@cf/zai-org/glm-4.7-flash', choices: [{ message: { content: '' } }] }), 'ai_empty_response']]) {
     const result = await errorFor(() => generateSalesInsight(request, session, env, deps({ fetch: async () => new Response(body, { status: 200 }) })))
     assert.equal(result.body.code, code)
+  }
+})
+
+test('responses must confirm the exact allowed model', async () => {
+  for (const model of [undefined, 'other-model']) {
+    const result = await errorFor(() => generateSalesInsight(request, session, env, deps({ fetch: async () => new Response(JSON.stringify({ model, choices: [{ message: { content: 'Jawaban' } }] }), { status: 200 }) })))
+    assert.equal(result.body.code, 'ai_model_mismatch')
   }
 })
 

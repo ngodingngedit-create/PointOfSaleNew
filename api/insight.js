@@ -86,6 +86,8 @@ export async function generateSalesInsight(body, session, env = process.env, dep
         max_completion_tokens: 700,
         stream: false,
         store: false,
+        // Avoid spending the entire short completion budget on internal reasoning.
+        chat_template_kwargs: { enable_thinking: false },
         messages: [
           {
             role: 'system',
@@ -115,9 +117,10 @@ export async function generateSalesInsight(body, session, env = process.env, dep
 
   let result
   try { result = await response.json() } catch { throw new InsightServiceError('ai_invalid_response', 'Jawaban Insight tidak dapat dibaca. Coba lagi nanti.') }
+  if (result?.model !== MODEL_ID) throw new InsightServiceError('ai_model_mismatch', 'Layanan Insight tidak mengonfirmasi model yang diizinkan. Coba lagi nanti.')
   const answer = result?.choices?.[0]?.message?.content
   if (typeof answer !== 'string' || !answer.trim()) throw new InsightServiceError('ai_empty_response', 'Layanan Insight tidak mengembalikan jawaban. Coba lagi nanti.')
-  return { answer: answer.trim().slice(0, 4000), from: range.from, to: range.to, model: MODEL_ID }
+  return { answer: answer.trim().slice(0, 4000), from: range.from, to: range.to, model: result.model }
 }
 
 export function insightErrorResponse(error) {
