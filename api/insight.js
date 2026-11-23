@@ -5,8 +5,8 @@ import { aggregateSales, loadCompletedSales, resolveSalesRange } from './_lib/sa
 import { enforceRateLimits, insightRateLimitKeys } from './_lib/rate-limit.js'
 import { requireSession } from './_lib/sessions.js'
 
-const TOKEN_HARBOR_URL = 'https://tokenharbor.ai/v1/chat/completions'
-const MODEL_ID = 'mimo-v2.6-flash:free'
+const CLOUDFLARE_API_BASE = 'https://api.cloudflare.com/client/v4/accounts'
+const MODEL_ID = '@cf/zai-org/glm-4.7-flash'
 const SALES_TERMS = /\b(penjualan|omzet|pendapatan|transaksi|produk|menu|laris|terlaris|terjual|tren|ringkasan|ringkas|analisis|analisa|rekomendasi|saran|performa|perbandingan|bandingkan|rata-rata|sales|revenue|sold|trend|summary|recommendation|compare|bestseller)\b/i
 const RESTRICTED_TERMS = /\b(member|pelanggan|customer|nama|nomor|telepon|phone|pin|password|token|api key|secret|rahasia|login|instruksi|prompt|system|assistant|developer|admin|ignore|abaikan|alamat|email)\b/i
 const MODEL_NAME_INJECTION = /\b(ignore|instruksi|system|assistant|developer|password|secret|token|api key|rahasia)\b/i
@@ -63,22 +63,29 @@ export async function generateSalesInsight(body, session, env = process.env, dep
   if (truncated) throw new HttpError(409, 'Rentang ini memuat terlalu banyak transaksi untuk dianalisis secara akurat. Pilih periode yang lebih pendek.')
   if (!Array.isArray(transactions)) throw new InsightServiceError('sales_unavailable', 'Data penjualan tidak tersedia. Coba lagi nanti; tidak ada data contoh yang digunakan.')
   if (transactions.length === 0) return { empty: true, message: 'Belum ada transaksi penjualan pada rentang tanggal ini untuk dianalisis.', from: range.from, to: range.to }
-  const apiKey = env.TOKEN_HARBOR_POS_API_KEY
-  if (!apiKey) throw new InsightServiceError('ai_not_configured', 'AI penjualan belum aktif: kunci Token Harbor khusus POS belum tersedia di server.')
+  const accountId = String(env.CLOUDFLARE_ACCOUNT_ID || '').trim()
+  const apiToken = env.CLOUDFLARE_WORKERS_AI_API_TOKEN
+  if (!/^[a-f0-9]{32}$/i.test(accountId) || !apiToken) {
+    throw new InsightServiceError('ai_not_configured', 'AI penjualan belum aktif: konfigurasi Workers AI server-only belum tersedia.')
+  }
 
   const modelData = toModelData(transactions, aggregateSales(transactions))
+  const endpoint = `${CLOUDFLARE_API_BASE}/${accountId}/ai/v1/chat/completions`
   let response
   try {
-    response = await (deps.fetch || fetch)(TOKEN_HARBOR_URL, {
+    response = await (deps.fetch || fetch)(endpoint, {
       method: 'POST',
+      cache: 'no-store',
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${apiToken}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
         model: MODEL_ID,
         temperature: 0.2,
-        max_tokens: 700,
+        max_completion_tokens: 700,
+        stream: false,
+        store: false,
         messages: [
           {
             role: 'system',
@@ -96,16 +103,14 @@ export async function generateSalesInsight(body, session, env = process.env, dep
     throw new InsightServiceError('ai_unreachable', 'Layanan Insight gratis tidak dapat dijangkau atau waktu tunggu habis. Coba lagi nanti.')
   }
   if (!response.ok) {
-    // Never relay provider messages, headers, request content or credentials to the browser.
-    const providerError = await response.json().catch(() => ({}))
-    if (providerError?.error?.code === 'free_models_disabled' || providerError?.error?.type === 'free_models_disabled') {
-      throw new InsightServiceError('ai_consent_required', 'Token Harbor meminta persetujuan berbagi data untuk model gratis. Insight belum aktif; tidak ada model berbayar yang digunakan.')
-    }
     if (response.status === 401 || response.status === 403) {
-      throw new InsightServiceError('ai_access_denied', 'Token Harbor menolak akses model gratis. Periksa kunci dan izin layanan POS.')
+      throw new InsightServiceError('ai_access_denied', 'Cloudflare Workers AI menolak akses. Periksa token dan izin Workers AI; tidak ada paket berbayar yang digunakan.')
     }
-    if (response.status === 429) throw new InsightServiceError('ai_busy', 'Layanan Insight gratis sedang mencapai batas penggunaan. Coba lagi nanti.')
-    throw new InsightServiceError('ai_unavailable', 'Layanan Insight gratis sedang tidak tersedia. Tidak ada model berbayar atau data contoh yang digunakan.')
+    if (response.status === 402 || response.status === 429) {
+      throw new InsightServiceError('ai_free_quota', 'Kuota gratis Workers AI sedang habis atau dibatasi. Coba lagi nanti; tidak ada paket atau model berbayar yang digunakan.')
+    }
+    // Never relay provider messages, headers, request content or credentials to the browser.
+    throw new InsightServiceError('ai_unavailable', 'Cloudflare Workers AI sedang tidak tersedia. Tidak ada model berbayar atau data contoh yang digunakan.')
   }
 
   let result

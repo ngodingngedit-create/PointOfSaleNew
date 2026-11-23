@@ -4,8 +4,13 @@ import { generateSalesInsight, insightErrorResponse } from '../api/insight.js'
 import { loadCompletedSales, resolveSalesRange } from '../api/_lib/sales.js'
 
 // These fixtures exist only in isolated unit tests, never in the application or database.
+const accountId = 'a'.repeat(32)
 const session = { id: 'cashier-1', role: 'cashier' }
-const env = { POS_SESSION_SECRET: 'x'.repeat(40), TOKEN_HARBOR_POS_API_KEY: 'test-key' }
+const env = {
+  POS_SESSION_SECRET: 'x'.repeat(40),
+  CLOUDFLARE_ACCOUNT_ID: accountId,
+  CLOUDFLARE_WORKERS_AI_API_TOKEN: 'test-key',
+}
 const cashier = { _id: session.id, name: 'Cashier', branch: { _id: 'branch-1', isActive: true } }
 const request = { question: 'Ringkasan penjualan periode ini', from: '2026-11-23', to: '2026-11-23' }
 const sales = [
@@ -27,8 +32,11 @@ async function errorFor(fn) {
   try { await fn(); assert.fail('expected an error') } catch (error) { return insightErrorResponse(error) }
 }
 
-test('AI receives only the selected branch, period, aggregates and the pinned free model', async () => {
+test('AI receives only real selected-branch sales aggregates through Cloudflare Free model', async () => {
   let sent
+  let requestUrl
+  let requestHeaders
+  let requestCache
   let branch
   let range
   const result = await generateSalesInsight(request, session, env, deps({
@@ -38,7 +46,9 @@ test('AI receives only the selected branch, period, aggregates and the pinned fr
       return { transactions: sales, truncated: false }
     },
     fetch: async (url, options) => {
-      assert.equal(url, 'https://tokenharbor.ai/v1/chat/completions')
+      requestUrl = url
+      requestHeaders = options.headers
+      requestCache = options.cache
       sent = JSON.parse(options.body)
       return new Response(JSON.stringify({ choices: [{ message: { content: 'Ringkasan dari data transaksi.' } }] }), { status: 200 })
     },
@@ -46,15 +56,21 @@ test('AI receives only the selected branch, period, aggregates and the pinned fr
   assert.equal(branch, 'branch-1')
   assert.equal(range.startIso, '2026-11-22T17:00:00.000Z')
   assert.equal(range.endExclusiveIso, '2026-11-23T17:00:00.000Z')
-  assert.equal(sent.model, 'mimo-v2.6-flash:free')
+  assert.equal(requestUrl, `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/v1/chat/completions`)
+  assert.equal(requestHeaders.Authorization, 'Bearer test-key')
+  assert.equal(requestCache, 'no-store')
+  assert.equal(sent.model, '@cf/zai-org/glm-4.7-flash')
+  assert.equal(sent.stream, false)
+  assert.equal(sent.store, false)
+  assert.equal(sent.max_completion_tokens, 700)
   const content = JSON.parse(sent.messages[1].content)
   assert.deepEqual(content.periode, { from: request.from, to: request.to })
   assert.equal(content.dataPenjualan.summary.sales, 60000)
   assert.equal(content.dataPenjualan.summary.transactionCount, 2)
   assert.equal(content.dataPenjualan.topProducts.length, 2)
-  assert.doesNotMatch(JSON.stringify(sent), /PRIVATE CASHIER|PRIVATE MEMBER/)
+  assert.doesNotMatch(JSON.stringify(sent), /PRIVATE CASHIER|PRIVATE MEMBER|cashier_name|member_id/)
   assert.equal(result.answer, 'Ringkasan dari data transaksi.')
-  assert.equal(result.model, 'mimo-v2.6-flash:free')
+  assert.equal(result.model, '@cf/zai-org/glm-4.7-flash')
 })
 
 test('no sales returns a clear empty state without calling a model or requiring a key', async () => {
@@ -68,7 +84,7 @@ test('no sales returns a clear empty state without calling a model or requiring 
   assert.equal(called, false)
 })
 
-test('missing, unavailable or truncated data never generates a synthetic answer', async () => {
+test('missing, unavailable or truncated sales never generate a synthetic answer', async () => {
   let calls = 0
   const neverCall = async () => { calls++; throw new Error('must not call') }
   for (const load of [
@@ -83,22 +99,34 @@ test('missing, unavailable or truncated data never generates a synthetic answer'
   assert.equal(calls, 0)
 })
 
-test('missing key and provider access, consent, rate and network failures have safe useful errors without fallback', async () => {
-  const noKey = await errorFor(() => generateSalesInsight(request, session, { POS_SESSION_SECRET: env.POS_SESSION_SECRET }, deps()))
-  assert.equal(noKey.body.code, 'ai_not_configured')
-  for (const [status, payload, expected] of [
-    [403, { error: { code: 'free_models_disabled', message: 'private detail' } }, 'ai_consent_required'],
-    [401, { error: { message: 'private detail' } }, 'ai_access_denied'],
-    [429, { error: { message: 'private detail' } }, 'ai_busy'],
-    [500, { error: { message: 'private detail' } }, 'ai_unavailable'],
+test('missing or invalid Cloudflare configuration never calls a provider', async () => {
+  for (const config of [
+    { POS_SESSION_SECRET: env.POS_SESSION_SECRET },
+    { ...env, CLOUDFLARE_ACCOUNT_ID: 'not-an-account-id' },
+    { ...env, CLOUDFLARE_WORKERS_AI_API_TOKEN: '' },
+  ]) {
+    let called = false
+    const response = await errorFor(() => generateSalesInsight(request, session, config, deps({ fetch: async () => { called = true } })))
+    assert.equal(response.body.code, 'ai_not_configured')
+    assert.equal(called, false)
+  }
+})
+
+test('provider quota, access and service failures remain safe errors with no fallback', async () => {
+  for (const [status, expected] of [
+    [401, 'ai_access_denied'],
+    [403, 'ai_access_denied'],
+    [402, 'ai_free_quota'],
+    [429, 'ai_free_quota'],
+    [500, 'ai_unavailable'],
   ]) {
     let calls = 0
     const result = await errorFor(() => generateSalesInsight(request, session, env, deps({ fetch: async () => {
       calls++
-      return new Response(JSON.stringify(payload), { status })
+      return new Response(JSON.stringify({ errors: [{ message: 'private provider detail' }] }), { status })
     } })))
     assert.equal(result.body.code, expected)
-    assert.doesNotMatch(JSON.stringify(result), /private detail|test-key/)
+    assert.doesNotMatch(JSON.stringify(result), /private provider detail|test-key/)
     assert.equal(calls, 1)
   }
   const network = await errorFor(() => generateSalesInsight(request, session, env, deps({ fetch: async () => { throw new Error('secret detail') } })))
